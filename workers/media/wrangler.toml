@@ -1,6 +1,11 @@
 name = "travel-log-media"
 main = "src/index.js"
 compatibility_date = "2024-12-01"
+workers_dev = true
+
+routes = [
+  { pattern = "gabriel-kane.com/travel-log*", zone_name = "gabriel-kane.com" }
+]
 
 [[r2_buckets]]
 binding = "TRIPS"

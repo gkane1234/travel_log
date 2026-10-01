@@ -188,10 +188,7 @@ export default {
         if (session.ok) return redirect(destination);
         return loginPage(url.searchParams.get("next"));
       }
-      if (!session.ok) {
-        if (session.status === 503) return json({ error: session.error }, 503);
-        return loginRedirect(url);
-      }
+      if (!session.ok) return loginRedirect(url);
       if (url.pathname.startsWith(`${PUBLIC_PREFIX}/media/`)) {
         const key = decodeURIComponent(url.pathname.slice(`${PUBLIC_PREFIX}/`.length));
         if (!isAllowedKey(key)) return json({ error: "Not found" }, 404);

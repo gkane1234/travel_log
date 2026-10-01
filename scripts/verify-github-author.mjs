@@ -9,7 +9,10 @@ import {
   routeRepoPath,
 } from "../src/lib/github/commit-plan.ts";
 import { convertHeicFile } from "../src/lib/github/media.ts";
+import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
 import { storageConfigError } from "../workers/media/src/config.js";
+import { checkLogin, respondToMediaGet } from "../workers/media/src/gate.js";
+import sharp from "sharp";
 
 const day = dayRepoPath("olympic-peninsula", "2026-09-08");
 const gpx = routeRepoPath("olympic-peninsula", "shoreline.gpx");
@@ -58,11 +61,80 @@ assert.equal(
     S3_BUCKET: "travel-log-media",
     S3_ACCESS_KEY_ID: "example",
     S3_SECRET_ACCESS_KEY: "example",
-    PUBLIC_BASE_URL: "https://media.example",
+    MEDIA_BASE_URL: "https://trips.example",
+    MEDIA_PASSWORD: "not-a-real-secret",
     UPLOAD_TOKEN: "device-only",
   }),
   null,
 );
+
+class FakeCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.bitmap = null;
+  }
+  getContext() {
+    const canvas = this;
+    return {
+      drawImage(bitmap) {
+        canvas.bitmap = bitmap;
+      },
+    };
+  }
+  async convertToBlob() {
+    const bitmap = this.bitmap;
+    const out = await sharp(bitmap.raw, {
+      raw: { width: bitmap.width, height: bitmap.height, channels: 4 },
+    })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+    return new Blob([out], { type: "image/jpeg" });
+  }
+}
+
+globalThis.createImageBitmap = async (blob) => {
+  const input = Buffer.from(await blob.arrayBuffer());
+  const { data, info } = await sharp(input).rotate().ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { width: info.width, height: info.height, raw: data, close() {} };
+};
+globalThis.OffscreenCanvas = FakeCanvas;
+
+const marker = "GPSLatitude=47.6062N";
+const plain = await sharp({
+  create: { width: 8, height: 8, channels: 3, background: { r: 20, g: 80, b: 40 } },
+})
+  .jpeg()
+  .toBuffer();
+const payload = Buffer.from(marker);
+const app1 = Buffer.concat([
+  Buffer.from([0xff, 0xe1, (payload.length + 2) >> 8, (payload.length + 2) & 0xff]),
+  payload,
+]);
+const withGps = Buffer.concat([plain.subarray(0, 2), app1, plain.subarray(2)]);
+assert.equal(withGps.includes(marker), true);
+const stripped = Buffer.from(await (await reencodePhoto(new Blob([withGps], { type: "image/jpeg" }))).arrayBuffer());
+assert.equal(stripped.includes(Buffer.from(marker)), false);
+assert.equal(stripped[0], 0xff);
+assert.equal(stripped[1], 0xd8);
+
+const mediaEnv = { MEDIA_PASSWORD: "not-a-real-secret" };
+const denied = await respondToMediaGet(
+  new Request("https://trips.example/media/olympic-peninsula/shore.jpg"),
+  mediaEnv,
+);
+assert.equal(denied?.status, 401);
+const login = await checkLogin({ password: "not-a-real-secret" }, mediaEnv);
+assert.equal(login.ok, true);
+assert.match(login.cookie, /HttpOnly/);
+assert.match(login.cookie, /Secure/);
+const allowed = await respondToMediaGet(
+  new Request("https://trips.example/media/olympic-peninsula/shore.jpg", {
+    headers: { Cookie: login.cookie.split(";")[0] },
+  }),
+  mediaEnv,
+);
+assert.equal(allowed, null);
 
 let failed = false;
 try {

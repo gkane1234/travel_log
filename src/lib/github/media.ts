@@ -7,6 +7,7 @@ import {
   sanitizeBasename,
   uniqueFilename,
 } from "./commit-plan.ts";
+import { reencodePhoto } from "./strip-photo.ts";
 
 export type PreparedFile = {
   filename: string;
@@ -99,19 +100,34 @@ export async function prepareDroppedFile(
 
   if (ext === ".heic" || ext === ".heif") {
     const jpeg = await convertHeicFile(file);
+    const clean = await reencodePhoto(jpeg);
     const base = sanitizeBasename(file.name);
     const filename = uniqueFilename(photos, base, ".jpg");
     return {
       filename,
       markdown: "",
-      bytes: new Uint8Array(await jpeg.arrayBuffer()),
+      bytes: new Uint8Array(await clean.arrayBuffer()),
       kind: "photo",
       objectKey: mediaObjectKey(slug, filename),
       contentType: "image/jpeg",
     };
   }
 
-  if ([".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext)) {
+  if ([".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
+    const clean = await reencodePhoto(file);
+    const base = sanitizeBasename(file.name);
+    const filename = uniqueFilename(photos, base, ".jpg");
+    return {
+      filename,
+      markdown: "",
+      bytes: new Uint8Array(await clean.arrayBuffer()),
+      kind: "photo",
+      objectKey: mediaObjectKey(slug, filename),
+      contentType: "image/jpeg",
+    };
+  }
+
+  if (ext === ".gif") {
     const outExt = ext === ".jpeg" ? ".jpg" : ext;
     const base = sanitizeBasename(file.name);
     const filename = uniqueFilename(photos, base, outExt);

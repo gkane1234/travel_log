@@ -1,5 +1,6 @@
 import { AwsClient } from "aws4fetch";
 import { isAllowedKey, isAllowedType, storageConfigError } from "./config.js";
+import { checkLogin, loginPage, respondToMediaGet } from "./gate.js";
 
 function json(body, status, extra = {}) {
   return new Response(JSON.stringify(body), {
@@ -62,18 +63,88 @@ async function presign(env, key, contentType) {
     new Request(url, { method: "PUT", headers: { "content-type": contentType } }),
     { aws: { signQuery: true } },
   );
-  const publicBase = env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  const base = env.MEDIA_BASE_URL.replace(/\/$/, "");
   return {
     uploadUrl: signed.url,
-    publicUrl: `${publicBase}/${encodedKey}`,
+    publicUrl: `${base}/${key}`,
     headers: { "content-type": contentType },
   };
+}
+
+async function readPrivateObject(env, key) {
+  const aws = new AwsClient({
+    accessKeyId: env.S3_ACCESS_KEY_ID,
+    secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+    service: "s3",
+    region: (env.S3_REGION || "auto").trim(),
+  });
+  const endpoint = env.S3_ENDPOINT.replace(/\/$/, "");
+  const encodedKey = key.split("/").map(encodeURIComponent).join("/");
+  const url = `${endpoint}/${env.S3_BUCKET}/${encodedKey}`;
+  const signed = await aws.sign(url, { method: "GET" });
+  const upstream = await fetch(signed);
+  if (!upstream.ok) {
+    return json({ error: "Not found" }, upstream.status === 404 ? 404 : 502);
+  }
+  const headers = new Headers();
+  headers.set("Content-Type", upstream.headers.get("content-type") || "application/octet-stream");
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return new Response(upstream.body, { status: 200, headers });
+}
+
+async function readLoginBody(request) {
+  const type = request.headers.get("Content-Type") || "";
+  if (type.includes("application/json")) return request.json();
+  const form = await request.formData();
+  return { username: String(form.get("username") || ""), password: String(form.get("password") || "") };
 }
 
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
     const url = new URL(request.url);
+
+    if (request.method === "GET" && (url.pathname === "/login" || url.pathname === "/login/")) {
+      return loginPage();
+    }
+
+    if (request.method === "POST" && url.pathname === "/login") {
+      let body;
+      try {
+        body = await readLoginBody(request);
+      } catch {
+        return json({ error: "Expected a login form." }, 400);
+      }
+      const result = await checkLogin(body, env);
+      if (!result.ok) return json({ error: result.error }, result.status);
+      const type = request.headers.get("Content-Type") || "";
+      if (type.includes("application/x-www-form-urlencoded") || type.includes("multipart/form-data")) {
+        return new Response(null, {
+          status: 303,
+          headers: {
+            Location: `${env.MEDIA_BASE_URL || "/"}`.replace(/\/$/, "/") || "/",
+            "Set-Cookie": result.cookie,
+          },
+        });
+      }
+      return json({ ok: true }, 200, { "Set-Cookie": result.cookie });
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/media/")) {
+      const denied = await respondToMediaGet(request, env);
+      if (denied) return denied;
+      const configError = storageConfigError(env);
+      if (configError) return json({ error: configError }, 503);
+      const key = decodeURIComponent(url.pathname.slice(1));
+      if (!isAllowedKey(key)) return json({ error: "Not found" }, 404);
+      try {
+        return await readPrivateObject(env, key);
+      } catch {
+        return json({ error: "Could not read that file." }, 502);
+      }
+    }
+
     if (request.method !== "POST" || url.pathname !== "/sign") {
       return cors(json({ error: "Not found" }, 404));
     }

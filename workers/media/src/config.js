@@ -1,4 +1,11 @@
-const REQUIRED = ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "PUBLIC_BASE_URL"];
+const REQUIRED = [
+  "S3_ENDPOINT",
+  "S3_BUCKET",
+  "S3_ACCESS_KEY_ID",
+  "S3_SECRET_ACCESS_KEY",
+  "MEDIA_BASE_URL",
+  "MEDIA_PASSWORD",
+];
 
 export function missingConfig(env) {
   const source = env || {};

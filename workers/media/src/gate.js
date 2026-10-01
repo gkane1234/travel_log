@@ -28,7 +28,7 @@ export function readCookie(request, name) {
 }
 
 export function loginSetCookie(token) {
-  return `${MEDIA_COOKIE}=${token}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=2592000`;
+  return `${MEDIA_COOKIE}=${token}; HttpOnly; Secure; Path=/travel_log; SameSite=Lax; Max-Age=2592000`;
 }
 
 export async function mediaGate(request, env) {
@@ -83,7 +83,7 @@ export function loginPage() {
 <body>
   <h1>Photo login</h1>
   <p>Trip notes stay readable without this. Photos and videos need this sign-in.</p>
-  <form method="post" action="/login">
+  <form method="post" action="/travel_log/login">
     <label>Username <input name="username" autocomplete="username" /></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
     <button type="submit">Sign in</button>

@@ -10,7 +10,8 @@ import {
 } from "../src/lib/github/commit-plan.ts";
 import { convertHeicFile } from "../src/lib/github/media.ts";
 import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
-import { storageConfigError } from "../workers/media/src/config.js";
+import { mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
+import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
 import { checkLogin, respondToMediaGet } from "../workers/media/src/gate.js";
 import sharp from "sharp";
 
@@ -128,6 +129,14 @@ const login = await checkLogin({ password: "not-a-real-secret" }, mediaEnv);
 assert.equal(login.ok, true);
 assert.match(login.cookie, /HttpOnly/);
 assert.match(login.cookie, /Secure/);
+assert.match(login.cookie, /Path=\/travel_log/);
+assert.match(login.cookie, /SameSite=Lax/);
+assert.equal(
+  mediaPublicUrl("https://gabriel-kane.com", "media/olympic-peninsula/shore.jpg"),
+  "https://gabriel-kane.com/travel_log/media/olympic-peninsula/shore.jpg",
+);
+assert.equal(mediaWorkerOrigin("https://gabriel-kane.com/travel_log"), "https://gabriel-kane.com");
+assert.equal(`${mediaWorkerOrigin("https://gabriel-kane.com")}/travel_log/sign`, "https://gabriel-kane.com/travel_log/sign");
 const allowed = await respondToMediaGet(
   new Request("https://trips.example/media/olympic-peninsula/shore.jpg", {
     headers: { Cookie: login.cookie.split(";")[0] },

@@ -1,5 +1,5 @@
 import { AwsClient } from "aws4fetch";
-import { isAllowedKey, isAllowedType, storageConfigError } from "./config.js";
+import { isAllowedKey, isAllowedType, mediaPublicUrl, storageConfigError } from "./config.js";
 import { checkLogin, loginPage, respondToMediaGet } from "./gate.js";
 
 function json(body, status, extra = {}) {
@@ -63,10 +63,9 @@ async function presign(env, key, contentType) {
     new Request(url, { method: "PUT", headers: { "content-type": contentType } }),
     { aws: { signQuery: true } },
   );
-  const base = env.MEDIA_BASE_URL.replace(/\/$/, "");
   return {
     uploadUrl: signed.url,
-    publicUrl: `${base}/${key}`,
+    publicUrl: mediaPublicUrl(env.MEDIA_BASE_URL, key),
     headers: { "content-type": contentType },
   };
 }
@@ -100,17 +99,42 @@ async function readLoginBody(request) {
   return { username: String(form.get("username") || ""), password: String(form.get("password") || "") };
 }
 
+function redirect(location) {
+  return new Response(null, { status: 302, headers: { Location: location, "Cache-Control": "no-store" } });
+}
+
+function requestPath(url) {
+  return url.pathname.replace(/\/+$/, "") || "/";
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
     const url = new URL(request.url);
+    const path = requestPath(url);
 
-    const path = url.pathname.replace(/\/+$/, "") || "/";
     if (request.method === "GET" && (path === "/" || path === "/login")) {
+      return redirect("/travel_log/login");
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/media/")) {
+      return redirect(`/travel_log${url.pathname}${url.search}`);
+    }
+    if (request.method === "POST" && path === "/login") {
+      return json({ error: "Sign in with POST /travel_log/login." }, 404);
+    }
+    if (request.method === "POST" && path === "/sign") {
+      return cors(json({ error: "Upload signing moved to POST /travel_log/sign." }, 404));
+    }
+
+    if (request.method === "GET" && path === "/travel_log") {
+      return redirect("/travel_log/login");
+    }
+
+    if (request.method === "GET" && path === "/travel_log/login") {
       return loginPage();
     }
 
-    if (request.method === "POST" && url.pathname === "/login") {
+    if (request.method === "POST" && path === "/travel_log/login") {
       let body;
       try {
         body = await readLoginBody(request);
@@ -121,10 +145,11 @@ export default {
       if (!result.ok) return json({ error: result.error }, result.status);
       const type = request.headers.get("Content-Type") || "";
       if (type.includes("application/x-www-form-urlencoded") || type.includes("multipart/form-data")) {
+        const origin = mediaPublicUrl(env.MEDIA_BASE_URL || "", "").replace(/\/travel_log\/$/, "") || "/";
         return new Response(null, {
           status: 303,
           headers: {
-            Location: `${env.MEDIA_BASE_URL || "/"}`.replace(/\/$/, "/") || "/",
+            Location: origin,
             "Set-Cookie": result.cookie,
           },
         });
@@ -132,12 +157,12 @@ export default {
       return json({ ok: true }, 200, { "Set-Cookie": result.cookie });
     }
 
-    if (request.method === "GET" && url.pathname.startsWith("/media/")) {
+    if (request.method === "GET" && url.pathname.startsWith("/travel_log/media/")) {
       const denied = await respondToMediaGet(request, env);
       if (denied) return denied;
       const configError = storageConfigError(env);
       if (configError) return json({ error: configError }, 503);
-      const key = decodeURIComponent(url.pathname.slice(1));
+      const key = decodeURIComponent(url.pathname.slice("/travel_log/".length));
       if (!isAllowedKey(key)) return json({ error: "Not found" }, 404);
       try {
         return await readPrivateObject(env, key);
@@ -146,7 +171,7 @@ export default {
       }
     }
 
-    if (request.method !== "POST" || url.pathname !== "/sign") {
+    if (request.method !== "POST" || path !== "/travel_log/sign") {
       return cors(json({ error: "Not found" }, 404));
     }
 

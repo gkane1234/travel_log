@@ -22,6 +22,14 @@ export function storageConfigError(env) {
   return `Media storage is not configured (${missing.join(", ")}).`;
 }
 
+export const PUBLIC_PREFIX = "/travel_log";
+
+export function mediaPublicUrl(base, key) {
+  let origin = String(base || "").trim().replace(/\/$/, "");
+  if (origin.endsWith(PUBLIC_PREFIX)) origin = origin.slice(0, -PUBLIC_PREFIX.length);
+  return `${origin}${PUBLIC_PREFIX}/${key}`;
+}
+
 const KEY = /^media\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9][a-z0-9._-]{0,120}$/;
 
 export function isAllowedKey(key) {

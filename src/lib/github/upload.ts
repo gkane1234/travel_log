@@ -1,3 +1,10 @@
+/** Origin only. A pasted /travel_log suffix is removed so the sign path is not doubled. */
+export function mediaWorkerOrigin(workerUrl: string): string {
+  let base = workerUrl.trim().replace(/\/$/, "");
+  if (base.endsWith("/travel_log")) base = base.slice(0, -"/travel_log".length);
+  return base;
+}
+
 export type SignedUpload = {
   uploadUrl: string;
   publicUrl: string;
@@ -11,7 +18,7 @@ export async function uploadToBucket(options: {
   bytes: Uint8Array;
   contentType: string;
 }): Promise<string> {
-  const workerUrl = options.workerUrl.trim().replace(/\/$/, "");
+  const workerUrl = mediaWorkerOrigin(options.workerUrl);
   if (!workerUrl) {
     throw new Error(
       "Media upload URL is not set. Add it in GitHub settings. Photos and videos are not saved in the git repo.",
@@ -23,7 +30,7 @@ export async function uploadToBucket(options: {
 
   let signed: SignedUpload;
   try {
-    const response = await fetch(`${workerUrl}/sign`, {
+    const response = await fetch(`${workerUrl}/travel_log/sign`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.token}`,

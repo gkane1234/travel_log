@@ -84,7 +84,7 @@ Enter these values when prompted:
 - `GITHUB_REPOSITORY`: `gkane1234/travel_log`
 - `UPLOAD_TOKEN`: optional. If you set it, put the same value in the author page’s Upload token field. If you leave it empty, the editor sends the GitHub token and the Worker checks that token can read this repo.
 
-Uploads still use that GitHub token or `UPLOAD_TOKEN`. Viewing uses `MEDIA_PASSWORD` only. Open `/login` on the Cloudflare site and submit the password. The Worker sets an httpOnly Secure cookie. It does not check a password that ships in the page.
+Uploads still use that GitHub token or `UPLOAD_TOKEN`. Viewing uses `MEDIA_PASSWORD` only. Open https://gabriel-kane.com/login and submit the password. The Worker root (`/`) shows the same form, including on the `travel-log-media` workers.dev host. The Worker sets an httpOnly Secure cookie. It does not check a password that ships in the page. Keep the Worker routes on `gabriel-kane.com/login` and `gabriel-kane.com/media/*` so the trip notes on that site are not served by this Worker.
 
 `npx wrangler deploy` prints a workers.dev URL. Prefer the route on your own hostname, and paste that origin into **Media upload URL** on the author page (no path, no trailing slash). The note will point at `MEDIA_BASE_URL/media/...`, which the Worker serves.
 

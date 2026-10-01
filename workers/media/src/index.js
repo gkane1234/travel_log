@@ -105,7 +105,8 @@ export default {
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
     const url = new URL(request.url);
 
-    if (request.method === "GET" && (url.pathname === "/login" || url.pathname === "/login/")) {
+    const path = url.pathname.replace(/\/+$/, "") || "/";
+    if (request.method === "GET" && (path === "/" || path === "/login")) {
       return loginPage();
     }
 

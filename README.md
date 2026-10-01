@@ -1,37 +1,36 @@
 # Travel Log
 
-Astro site for trip journals. Public pages are readable without a login. Author mode, on the same site, requires a password and writes the markdown in `trips/`.
+Astro site for trip journals. Public pages (`/` and `/trips/<slug>/`) are built from the markdown in `trips/`. The author page is a browser app. Save commits that same markdown to GitHub, and GitHub Actions publishes the site to GitHub Pages. PC, Mac, and iPhone all use that one page.
 
-## Run
+## Run locally
 
 ```bash
 npm install
-copy .env.example .env
-```
-
-Set these in `.env` (author mode refuses to open if any are missing):
-
-- `AUTHOR_USERNAME`
-- `AUTHOR_PASSWORD`
-- `AUTHOR_SECRET`
-
-Development:
-
-```bash
 npm run dev
 ```
 
-`npm run dev` stops any stale process on port 4321 first. Then:
+`npm run dev` stops any stale process on port 4321 first.
 
 - Site: http://localhost:4321/
-- Author: http://localhost:4321/author (redirects to `/author/login`)
+- Author: http://localhost:4321/author/
 
-Production (one Node process serves the site and accepts author writes):
+`npm run build` writes the static site to `dist/`. `npm start` previews that build on port 4322. The live site is GitHub Pages, not a personal server.
 
-```bash
-npm run build
-npm start
-```
+## Author
+
+Open `/author/`. The first time, enter a GitHub personal access token and the repo (`owner` / `travel_log`). Those stay in this browser’s localStorage only. They are not in the repo.
+
+Save day, or drop a photo, video, or GPX, and the page creates one Git commit through the Git Data API. The commit includes the day note and any new files. HEIC photos become JPEG in the browser. JPEG, PNG, and WebP upload as-is. MP4 and smaller MOV files upload as-is. Files over about 100 MB are refused. A failed save leaves the text in the editor.
+
+After the commit, the Pages workflow rebuilds the public site.
+
+Create a token at GitHub → Settings → Developer settings → Personal access tokens. Classic tokens need the `repo` scope. Fine-grained tokens need read and write on Contents for this repository.
+
+## Install
+
+- Windows: `powershell -File scripts/author-shortcut.ps1 -Url "https://gkane1234.github.io/travel_log/author/"`. That puts a shortcut on the desktop. With no `-Url`, it opens the local author page.
+- Mac: `scripts/open-author.command https://gkane1234.github.io/travel_log/author/` then drag that file to the Dock. It is a launcher script, not a signed app.
+- iPhone: open the author URL in Safari → Share → Add to Home Screen. The in-app GitHub settings show the URL to use.
 
 ## Trip folder layout
 
@@ -39,18 +38,8 @@ npm start
 trips/<slug>/
   index.md              # title, dates, location, summary
   days/YYYY-MM-DD.mdx   # one file per day
-  photos/               # converted images and videos
-  routes/               # .gpx files
+  photos/
+  routes/
 ```
-
-## Author workflow
-
-1. Log in at `/author/login`, then create a trip (start date, optional end date).
-2. Write the current day. The editor saves on its own while you type, and immediately after a photo, video, or GPX drop.
-3. Use **Next day** / **Previous day**, or jump to a date. Days stay inside the trip’s date range when an end date is set; missing day files are created as you go.
-4. Drop `.heic`, `.jpg`, `.mov`, or `.gpx` (or a `.zip` that contains a `.gpx`) onto the text. HEIC becomes JPEG; MOV is transcoded to MP4 when possible. Markdown (or a `TripMap` / `TripVideo` tag) is inserted at the cursor.
-5. The public page is `/trips/<slug>/`.
-
-Each successful create, day save, photo, video, or GPX upload is committed locally in this folder. Nothing is pushed. If the backup commit fails, the save still sticks and Author shows a short warning. See history with `git log`.
 
 Your raw “Olympic Peninsula” source folder is left alone; copy media into a trip through Author when you are ready.

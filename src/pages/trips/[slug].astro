@@ -1,22 +1,24 @@
 ---
 import BaseLayout from "@layouts/BaseLayout.astro";
-import { loadPublicTrip } from "@lib/render-markdown";
+import { listPublicTrips, loadPublicTrip } from "@lib/render-markdown";
 import { formatTripDates, parseDateString } from "@lib/trips";
 
-export const prerender = false;
+export async function getStaticPaths() {
+  const trips = await listPublicTrips();
+  return trips.map((trip) => ({ params: { slug: trip.slug } }));
+}
 
-const slug = Astro.params.slug;
-if (!slug) return Astro.redirect("/");
-
-const page = await loadPublicTrip(slug);
-if (!page) return new Response("Not found", { status: 404 });
+const slug = Astro.params.slug ?? "";
+const base = import.meta.env.BASE_URL;
+const page = await loadPublicTrip(slug, base);
+if (!page) throw new Error(`Missing trip ${slug}`);
 
 const { meta, introHtml, days } = page;
 ---
 
 <BaseLayout title={meta.title} description={meta.summary}>
   <article class="prose">
-    <p class="meta"><a href="/">← Trips</a></p>
+    <p class="meta"><a href={base}>← Trips</a></p>
     <h1>{meta.title}</h1>
     <p class="meta">
       {

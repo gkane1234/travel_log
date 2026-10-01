@@ -1,0 +1,286 @@
+---
+interface Props {
+  slug?: string;
+}
+
+const { slug = "" } = Astro.props;
+---
+
+<section class="author" data-author-root data-slug={slug}>
+  <div id="screen-settings">
+    <h1>Author</h1>
+    <p class="meta">
+      This page saves trips to GitHub from this browser. The token stays in this browser only.
+    </p>
+    <form id="settings-form" class="author-form">
+      <h2>GitHub</h2>
+      <label>
+        Personal access token
+        <input name="token" type="password" autocomplete="off" />
+      </label>
+      <div class="row">
+        <label>
+          Owner
+          <input name="owner" required placeholder="your-name" />
+        </label>
+        <label>
+          Repository
+          <input name="repo" required placeholder="travel_log" />
+        </label>
+      </div>
+      <label>
+        Branch
+        <input name="branch" value="main" />
+      </label>
+      <label>
+        Published author URL
+        <input name="pagesUrl" placeholder="https://you.github.io/travel_log/author/" />
+      </label>
+      <button type="submit">Save in this browser</button>
+      <button type="button" id="forget-token" class="linkish">Forget token</button>
+      <p id="settings-error" class="error" hidden></p>
+    </form>
+    <label class="home-url">
+      Home Screen and shortcut URL
+      <input id="home-screen-url" readonly />
+    </label>
+    <p class="meta">
+      iPhone: open that URL in Safari, then Share → Add to Home Screen. Mac: run
+      <code>scripts/open-author.command</code> with that URL and keep it in the Dock. Windows: run
+      <code>scripts/author-shortcut.ps1 -Url</code> with that URL.
+    </p>
+  </div>
+
+  <div id="screen-list" hidden>
+    <h1>Author</h1>
+    <p id="list-status" class="meta">Save on this page commits straight to GitHub.</p>
+    <p>
+      <button type="button" class="linkish" data-open-settings>GitHub settings</button>
+    </p>
+
+    <form id="create-form" class="author-form">
+      <h2>New trip</h2>
+      <label>
+        Title
+        <input name="title" required placeholder="Olympic Peninsula" />
+      </label>
+      <label>
+        Slug
+        <input name="slug" placeholder="olympic-peninsula" />
+      </label>
+      <div class="row">
+        <label>
+          Start date
+          <input name="date" type="date" required />
+        </label>
+        <label>
+          End date
+          <input name="endDate" type="date" />
+        </label>
+      </div>
+      <label>
+        Location
+        <input name="location" placeholder="Washington" />
+      </label>
+      <label>
+        Summary
+        <input name="summary" placeholder="A week of rainforest and coast." />
+      </label>
+      <button type="submit">Create trip</button>
+      <p id="create-error" class="error" hidden></p>
+    </form>
+
+    <h2>Trips</h2>
+    <ul id="trip-list" class="author-list"></ul>
+  </div>
+
+  <div id="screen-editor" class="editor" hidden>
+    <p class="meta">
+      <button type="button" id="back-to-list" class="linkish">← Author</button>
+      ·
+      <a id="view-link" href="/">View trip</a>
+      ·
+      <button type="button" class="linkish" data-open-settings>GitHub settings</button>
+    </p>
+    <h1 id="trip-title">Loading…</h1>
+    <p id="trip-meta" class="meta"></p>
+    <p>
+      <button type="button" id="publish-trip" class="linkish">Show on the public site</button>
+    </p>
+
+    <div class="day-nav">
+      <button type="button" id="prev-day">Previous day</button>
+      <label class="jump">
+        Day
+        <input type="date" id="jump-date" />
+      </label>
+      <button type="button" id="next-day">Next day</button>
+      <button type="button" id="save-day" class="primary">Save day</button>
+    </div>
+
+    <p id="status" class="meta" aria-live="polite"></p>
+
+    <div id="dropzone" class="dropzone">
+      <textarea
+        id="day-body"
+        rows="18"
+        placeholder="Write this day's notes. Drop photos, videos, or GPX here (or use the buttons)."
+      ></textarea>
+      <div class="drop-hint">Drop .heic / .jpg / .png / .webp / .mp4 / .mov / .gpx / .zip onto the text</div>
+    </div>
+
+    <div class="upload-row">
+      <label class="file-btn">
+        Add photo / video
+        <input id="media-input" type="file" accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" hidden />
+      </label>
+      <label class="file-btn">
+        Add GPX
+        <input id="gpx-input" type="file" accept=".gpx,.zip" hidden />
+      </label>
+    </div>
+  </div>
+</section>
+
+<style>
+  .author,
+  .editor {
+    max-width: 48rem;
+  }
+  .author h1,
+  .author h2,
+  .editor h1 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+  .editor h1 {
+    margin: 0.4rem 0;
+  }
+  .author-form,
+  .home-url {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+    padding: 1.25rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .author-form label,
+  .home-url,
+  .jump {
+    display: grid;
+    gap: 0.3rem;
+    font-family: var(--font-ui);
+    font-size: 0.88rem;
+  }
+  input,
+  textarea {
+    font: inherit;
+    font-size: 16px;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--line);
+    background: #fff;
+  }
+  textarea {
+    width: 100%;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    line-height: 1.5;
+    padding: 0.9rem;
+    resize: vertical;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+  button,
+  .file-btn {
+    font-family: var(--font-ui);
+    font-size: 0.95rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    width: fit-content;
+  }
+  button.linkish {
+    background: transparent;
+    color: var(--muted);
+    border-color: transparent;
+    padding: 0;
+    margin: 0.25rem 0 0;
+  }
+  .day-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: end;
+    margin: 1.25rem 0 0.75rem;
+  }
+  .day-nav button,
+  .file-btn {
+    font-size: 0.9rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .day-nav button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .day-nav button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .dropzone.dragover textarea {
+    outline: 2px solid var(--accent);
+  }
+  .drop-hint {
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 0.4rem;
+  }
+  .upload-row {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 0.9rem;
+    flex-wrap: wrap;
+  }
+  .file-btn {
+    display: inline-block;
+  }
+  .error {
+    color: #8a2f2f;
+    font-family: var(--font-ui);
+    font-size: 0.9rem;
+  }
+  .author-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.5rem;
+  }
+  .author-list a {
+    font-family: var(--font-ui);
+  }
+  code {
+    font-size: 0.85em;
+  }
+  @media (max-width: 640px) {
+    .row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  import { mountAuthor } from "../lib/github/author-ui";
+
+  const root = document.querySelector<HTMLElement>("[data-author-root]");
+  if (root) mountAuthor(root);
+</script>

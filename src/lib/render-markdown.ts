@@ -19,9 +19,21 @@ function stripFrontmatter(raw: string): string {
   return text.slice(end + 4).replace(/^\r?\n/, "");
 }
 
+/** Prefix site-root media paths when GitHub Pages serves the site from a subpath. */
+export function publicAsset(url: string | undefined, base = "/"): string | undefined {
+  if (!url || !url.startsWith("/")) return url;
+  const prefix = base.endsWith("/") ? base.slice(0, -1) : base;
+  return `${prefix}${url}`;
+}
+
 /** Turn a day note into HTML, including TripMap and TripVideo tags. */
-export function renderMarkdown(raw: string): string {
+export function renderMarkdown(raw: string, base = "/"): string {
+  const prefix = base.endsWith("/") ? base.slice(0, -1) : base;
   let text = stripFrontmatter(raw);
+  if (prefix) {
+    text = text.replaceAll("(/trip-media/", `(${prefix}/trip-media/`);
+    text = text.replaceAll('src="/trip-media/', `src="${prefix}/trip-media/`);
+  }
   text = text.replace(/<TripVideo\s+src="([^"]+)"\s*\/?\s*>/g, (_, src: string) => {
     const safe = escapeHtml(src);
     return `<figure class="trip-video"><video controls playsinline preload="metadata" src="${safe}"></video></figure>`;
@@ -50,7 +62,7 @@ export async function listPublicTrips(): Promise<TripMeta[]> {
   return trips;
 }
 
-export async function loadPublicTrip(slug: string): Promise<{
+export async function loadPublicTrip(slug: string, base = "/"): Promise<{
   meta: TripMeta;
   introHtml: string;
   days: { date: string; html: string }[];
@@ -67,9 +79,9 @@ export async function loadPublicTrip(slug: string): Promise<{
   const days = [];
   for (const date of dates) {
     const day = await readDay(slug, date);
-    days.push({ date, html: renderMarkdown(day.body) });
+    days.push({ date, html: renderMarkdown(day.body, base) });
   }
-  return { meta, introHtml: renderMarkdown(indexRaw), days };
+  return { meta, introHtml: renderMarkdown(indexRaw, base), days };
 }
 
 async function readIndexBody(slug: string): Promise<string> {

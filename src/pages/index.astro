@@ -1,12 +1,11 @@
 ---
 import BaseLayout from "@layouts/BaseLayout.astro";
 import { site } from "@lib/site";
-import { listPublicTrips } from "@lib/render-markdown";
+import { listPublicTrips, publicAsset } from "@lib/render-markdown";
 import { formatTripDates, parseDateString } from "@lib/trips";
 
-export const prerender = false;
-
 const trips = await listPublicTrips();
+const base = import.meta.env.BASE_URL;
 ---
 
 <BaseLayout>
@@ -22,9 +21,9 @@ const trips = await listPublicTrips();
       <ul class="trip-list">
         {trips.map((trip) => (
           <li>
-            <a class="trip-card" href={`/trips/${trip.slug}/`}>
+            <a class="trip-card" href={`${base}trips/${trip.slug}/`}>
               <div class="trip-card__cover">
-                {trip.cover ? <img src={trip.cover} alt="" loading="lazy" /> : null}
+                {trip.cover ? <img src={publicAsset(trip.cover, base)} alt="" loading="lazy" /> : null}
               </div>
               <div>
                 <h2>{trip.title}</h2>

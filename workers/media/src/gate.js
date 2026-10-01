@@ -82,9 +82,10 @@ export async function checkLogin(body, env) {
   return { ok: true, cookie: loginSetCookie(await sessionToken(password)) };
 }
 
-export function loginPage(next) {
+export function loginPage(next, error) {
   const safe = safeNext(next);
   const action = safe ? `/travel-log/login?next=${encodeURIComponent(safe)}` : "/travel-log/login";
+  const message = error ? `<p>${String(error).replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>` : "";
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -95,6 +96,7 @@ export function loginPage(next) {
 <body>
   <h1>Travel log</h1>
   <p>Sign in to open the travel log.</p>
+  ${message}
   <form method="post" action="${action}">
     <label>Username <input name="username" autocomplete="username" required /></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>

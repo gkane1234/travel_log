@@ -228,7 +228,7 @@ export default {
         return json({ error: "Expected a login form." }, 400);
       }
       const result = await checkLogin(body, env);
-      if (!result.ok) return json({ error: result.error }, result.status);
+      if (!result.ok) return loginPage(url.searchParams.get("next"), result.error);
       const type = request.headers.get("Content-Type") || "";
       const destination = safeNext(url.searchParams.get("next")) || `${PUBLIC_PREFIX}/`;
       if (type.includes("application/x-www-form-urlencoded") || type.includes("multipart/form-data")) {

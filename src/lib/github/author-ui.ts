@@ -3,16 +3,20 @@ import {
   createTripMessage,
   dayRepoPath,
   filenamesIn,
+  imageMarkdownUrl,
   indexRepoPath,
   indexTrips,
   saveDayMessage,
+  videoMarkdownUrl,
 } from "./commit-plan.ts";
 import { addDays, slugify } from "./dates.ts";
 import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip } from "./frontmatter.ts";
 import { prepareDroppedFile } from "./media.ts";
 import { clearSettings, loadSettings, saveSettings, type GithubSettings } from "./settings.ts";
+import { uploadToBucket } from "./upload.ts";
 
 type Tip = { commitSha: string; treeSha: string };
+type PreparedRoute = { repoPath: string; bytes: Uint8Array };
 
 function textBytes(value: string): Uint8Array {
   return new TextEncoder().encode(value);
@@ -95,8 +99,15 @@ export function mountAuthor(root: HTMLElement): void {
     const token = settingsForm.querySelector<HTMLInputElement>('[name="token"]');
     if (owner) owner.value = settings?.owner ?? "";
     if (repo) repo.value = settings?.repo ?? "";
-    if (branch) branch.value = settings?.branch ?? "main";
+    if (branch) branch.value = settings?.branch ?? "master";
     if (pages) pages.value = settings?.pagesUrl ?? "";
+    const worker = settingsForm.querySelector<HTMLInputElement>('[name="mediaWorkerUrl"]');
+    const uploadToken = settingsForm.querySelector<HTMLInputElement>('[name="uploadToken"]');
+    if (worker) worker.value = settings?.mediaWorkerUrl ?? "";
+    if (uploadToken) {
+      uploadToken.value = "";
+      uploadToken.placeholder = settings?.uploadToken ? "Saved in this browser" : "Optional";
+    }
     if (token) {
       token.value = "";
       token.placeholder = settings?.token ? "Saved in this browser" : "github_pat_… or ghp_…";
@@ -255,7 +266,7 @@ export function mountAuthor(root: HTMLElement): void {
     }
   }
 
-  async function saveWithFiles(prepared: Awaited<ReturnType<typeof prepareDroppedFile>>[]): Promise<void> {
+  async function saveWithFiles(routes: PreparedRoute[]): Promise<void> {
     if (!trip || !currentDate) return;
     if (saving) return;
     saving = true;
@@ -264,13 +275,12 @@ export function mountAuthor(root: HTMLElement): void {
     setStatus("Saving…");
     try {
       await commit(saveDayMessage(trip.title, date), [
-        ...prepared.map((file) => ({ path: file.repoPath, bytes: file.bytes })),
+        ...routes.map((file) => ({ path: file.repoPath, bytes: file.bytes })),
         { path: dayPath(trip.slug, date), bytes: textBytes(body) },
       ]);
       if (!trip.dayDates.includes(date)) trip.dayDates.push(date);
       dirty = false;
-      const names = prepared.map((file) => file.filename).join(", ");
-      setStatus(`Saved ${names} to GitHub`);
+      setStatus(routes.length ? "Saved the note and route to GitHub" : "Saved the note to GitHub");
     } catch (error) {
       dirty = true;
       setStatus(error instanceof Error ? error.message : "Save failed");
@@ -280,7 +290,7 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   async function handleFiles(files: File[]): Promise<void> {
-    if (!trip || !files.length) return;
+    if (!trip || !files.length || !settings) return;
     const photos = filenamesIn(paths, trip.slug, "photos");
     const routes = filenamesIn(paths, trip.slug, "routes");
     const prepared = [];
@@ -293,8 +303,41 @@ export function mountAuthor(root: HTMLElement): void {
         return;
       }
     }
-    for (const item of prepared) insertAtCursor(bodyEl, item.markdown);
-    if (prepared.length) await saveWithFiles(prepared);
+
+    const ready: { markdown: string; route?: PreparedRoute }[] = [];
+    for (const item of prepared) {
+      if (item.kind === "route" && item.repoPath) {
+        ready.push({
+          markdown: item.markdown,
+          route: { repoPath: item.repoPath, bytes: item.bytes },
+        });
+        continue;
+      }
+      if (!item.objectKey || !item.contentType) {
+        setStatus("Could not prepare that file.");
+        return;
+      }
+      setStatus(`Uploading ${item.filename}…`);
+      try {
+        const url = await uploadToBucket({
+          workerUrl: settings.mediaWorkerUrl,
+          token: settings.uploadToken || settings.token,
+          objectKey: item.objectKey,
+          bytes: item.bytes,
+          contentType: item.contentType,
+        });
+        const alt = item.filename.replace(/\.[^.]+$/, "");
+        ready.push({
+          markdown: item.kind === "video" ? videoMarkdownUrl(url) : imageMarkdownUrl(url, alt),
+        });
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Upload failed");
+        return;
+      }
+    }
+
+    for (const item of ready) insertAtCursor(bodyEl, item.markdown);
+    await saveWithFiles(ready.flatMap((item) => (item.route ? [item.route] : [])));
   }
 
   function renderList(trips: RemoteTrip[]): void {
@@ -344,8 +387,10 @@ export function mountAuthor(root: HTMLElement): void {
     const token = String(data.get("token") || "").trim() || settings?.token || "";
     const owner = String(data.get("owner") || "").trim();
     const repo = String(data.get("repo") || "").trim();
-    const branch = String(data.get("branch") || "main").trim() || "main";
+    const branch = String(data.get("branch") || "master").trim() || "master";
     const pagesUrl = String(data.get("pagesUrl") || "").trim();
+    const mediaWorkerUrl = String(data.get("mediaWorkerUrl") || "").trim();
+    const uploadToken = String(data.get("uploadToken") || "").trim() || settings?.uploadToken || "";
     if (!token || !owner || !repo) {
       showSettingsError("A token, owner, and repository name are required.");
       return;
@@ -354,7 +399,7 @@ export function mountAuthor(root: HTMLElement): void {
       showSettingsError("Owner and repository should look like owner/name, without spaces.");
       return;
     }
-    settings = { token, owner, repo, branch, pagesUrl };
+    settings = { token, owner, repo, branch, pagesUrl, mediaWorkerUrl, uploadToken };
     saveSettings(settings);
     tip = null;
     paths = [];

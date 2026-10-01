@@ -6,6 +6,8 @@ export type GithubSettings = {
   repo: string;
   branch: string;
   pagesUrl: string;
+  mediaWorkerUrl: string;
+  uploadToken: string;
 };
 
 export function loadSettings(): GithubSettings | null {
@@ -18,8 +20,10 @@ export function loadSettings(): GithubSettings | null {
       token: data.token,
       owner: data.owner.trim(),
       repo: data.repo.trim(),
-      branch: (data.branch || "main").trim(),
+      branch: (data.branch || "master").trim(),
       pagesUrl: (data.pagesUrl || "").trim(),
+      mediaWorkerUrl: (data.mediaWorkerUrl || "").trim(),
+      uploadToken: (data.uploadToken || "").trim(),
     };
   } catch {
     return null;
@@ -33,8 +37,10 @@ export function saveSettings(settings: GithubSettings): void {
       token: settings.token,
       owner: settings.owner.trim(),
       repo: settings.repo.trim(),
-      branch: (settings.branch || "main").trim(),
+      branch: (settings.branch || "master").trim(),
       pagesUrl: settings.pagesUrl.trim(),
+      mediaWorkerUrl: settings.mediaWorkerUrl.trim(),
+      uploadToken: settings.uploadToken.trim(),
     }),
   );
 }

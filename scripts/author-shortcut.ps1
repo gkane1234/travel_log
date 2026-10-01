@@ -1,3 +1,4 @@
+# This shortcut only opens the author page. Photos and videos are not committed to git.
 param(
   [string]$Url = "http://localhost:4321/author/"
 )

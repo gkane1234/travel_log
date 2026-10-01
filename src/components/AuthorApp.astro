@@ -10,7 +10,7 @@ const { slug = "" } = Astro.props;
   <div id="screen-settings">
     <h1>Author</h1>
     <p class="meta">
-      This page saves trips to GitHub from this browser. The token stays in this browser only.
+      This page saves day notes to GitHub. Photos and videos go to object storage, then the note stores their public URL.
     </p>
     <form id="settings-form" class="author-form">
       <h2>GitHub</h2>
@@ -30,8 +30,21 @@ const { slug = "" } = Astro.props;
       </div>
       <label>
         Branch
-        <input name="branch" value="main" />
+        <input name="branch" value="master" />
       </label>
+      <h2>Photos and videos</h2>
+      <p class="meta">Uploaded to the bucket first. They are not added to the git commit.</p>
+      <label>
+        Media upload URL
+        <input name="mediaWorkerUrl" placeholder="https://travel-log-media.example.workers.dev" />
+      </label>
+      <label>
+        Upload token
+        <input name="uploadToken" type="password" autocomplete="off" />
+      </label>
+      <p class="meta">
+        Leave the upload token blank to use the GitHub token. Bucket keys stay on the Cloudflare Worker.
+      </p>
       <label>
         Published author URL
         <input name="pagesUrl" placeholder="https://you.github.io/travel_log/author/" />
@@ -53,7 +66,7 @@ const { slug = "" } = Astro.props;
 
   <div id="screen-list" hidden>
     <h1>Author</h1>
-    <p id="list-status" class="meta">Save on this page commits straight to GitHub.</p>
+    <p id="list-status" class="meta">Day notes commit to GitHub. Photos and videos upload to the bucket.</p>
     <p>
       <button type="button" class="linkish" data-open-settings>GitHub settings</button>
     </p>
@@ -126,7 +139,7 @@ const { slug = "" } = Astro.props;
         rows="18"
         placeholder="Write this day's notes. Drop photos, videos, or GPX here (or use the buttons)."
       ></textarea>
-      <div class="drop-hint">Drop .heic / .jpg / .png / .webp / .mp4 / .mov / .gpx / .zip onto the text</div>
+      <div class="drop-hint">Drop .heic / .jpg / .png / .webp / .mp4 / .mov / .gpx / .zip onto the text. Photos and videos upload to the bucket. GPX stays in git.</div>
     </div>
 
     <div class="upload-row">

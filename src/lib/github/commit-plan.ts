@@ -1,6 +1,7 @@
 /** Pure Git Data API payloads. No network, no token, no filesystem. */
 
-export const GITHUB_MAX_BYTES = 90 * 1024 * 1024;
+/** GitHub warns above 50 MB and rejects above 100 MB. Never commit a file over this. */
+export const GIT_MAX_BYTES = 50 * 1024 * 1024;
 
 export type TreeEntry = {
   path: string;
@@ -52,12 +53,54 @@ export function indexRepoPath(slug: string): string {
   return `trips/${slug}/index.md`;
 }
 
-export function imageMarkdown(slug: string, filename: string, alt: string): string {
-  return `![${alt}](/trip-media/${slug}/photos/${filename})`;
+export function imageMarkdownUrl(url: string, alt: string): string {
+  assertPublicUrl(url);
+  const safeAlt = alt.replace(/[\[\]]/g, "");
+  return `![${safeAlt}](${url})`;
 }
 
-export function videoMarkdown(slug: string, filename: string): string {
-  return `<TripVideo src="/trip-media/${slug}/photos/${filename}" />`;
+export function videoMarkdownUrl(url: string): string {
+  assertPublicUrl(url);
+  return `<TripVideo src="${url}" />`;
+}
+
+export function mediaObjectKey(slug: string, filename: string): string {
+  return `media/${slug}/${filename}`;
+}
+
+function assertPublicUrl(url: string): void {
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error("Media URL must be an absolute http(s) address.");
+  }
+}
+
+const MEDIA_IN_GIT = /(?:^|\/)photos\/|\.(?:jpe?g|png|gif|webp|heic|heif|mp4|mov|m4v|webm)$/i;
+
+/** Refuse image and video blobs, and anything over 50 MB, before a git commit is built. */
+export function assertGitCommitFiles(files: { path: string; bytes: Uint8Array }[]): void {
+  for (const file of files) {
+    const filePath = file.path.replace(/\\/g, "/");
+    if (MEDIA_IN_GIT.test(filePath)) {
+      throw new Error("Images and videos are stored in the bucket, not in git.");
+    }
+    if (file.bytes.byteLength > GIT_MAX_BYTES) {
+      throw new Error(gitTooLargeMessage(filePath));
+    }
+  }
+}
+
+export function gitCommitPlan(files: { path: string; bytes: Uint8Array }[]): { path: string }[] {
+  assertGitCommitFiles(files);
+  return files.map((file) => ({ path: file.path.replace(/\\/g, "/") }));
+}
+
+/** Keep absolute media URLs intact and prefix only old /trip-media paths. */
+export function applySiteBase(markdown: string, base = "/"): string {
+  const prefix = base.endsWith("/") ? base.slice(0, -1) : base;
+  if (!prefix) return markdown;
+  return markdown
+    .replaceAll("(/trip-media/", `(${prefix}/trip-media/`)
+    .replaceAll('src="/trip-media/', `src="${prefix}/trip-media/`);
 }
 
 export function mapMarkdown(slug: string, filename: string, title: string): string {
@@ -146,8 +189,8 @@ export function uniqueFilename(existing: Set<string>, base: string, ext: string)
   return name;
 }
 
-export function uploadTooLargeMessage(name: string): string {
-  return `${name} is too large for GitHub (limit is about 100 MB). Export a smaller MP4 or photo and try again.`;
+export function gitTooLargeMessage(name: string): string {
+  return `${name} is over 50 MB, so it cannot be committed to GitHub.`;
 }
 
 export function bytesToBase64(bytes: Uint8Array): string {

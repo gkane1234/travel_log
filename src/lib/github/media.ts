@@ -1,21 +1,21 @@
 import {
-  GITHUB_MAX_BYTES,
-  imageMarkdown,
+  GIT_MAX_BYTES,
+  gitTooLargeMessage,
   mapMarkdown,
-  photoRepoPath,
+  mediaObjectKey,
   routeRepoPath,
   sanitizeBasename,
   uniqueFilename,
-  uploadTooLargeMessage,
-  videoMarkdown,
 } from "./commit-plan.ts";
 
 export type PreparedFile = {
   filename: string;
-  repoPath: string;
   markdown: string;
   bytes: Uint8Array;
   kind: "photo" | "video" | "route";
+  repoPath?: string;
+  objectKey?: string;
+  contentType?: string;
 };
 
 const HEIC_ERROR =
@@ -56,6 +56,16 @@ function extOf(name: string): string {
   return match ? match[0] : "";
 }
 
+function contentTypeFor(ext: string): string {
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".webm") return "video/webm";
+  if (ext === ".mov") return "video/quicktime";
+  if (ext === ".mp4" || ext === ".m4v") return "video/mp4";
+  return "image/jpeg";
+}
+
 export async function prepareDroppedFile(
   file: File,
   slug: string,
@@ -63,9 +73,6 @@ export async function prepareDroppedFile(
   routes: Set<string>,
 ): Promise<PreparedFile> {
   const ext = extOf(file.name);
-  if (file.size > GITHUB_MAX_BYTES) {
-    throw new Error(uploadTooLargeMessage(file.name));
-  }
 
   if (ext === ".gpx" || ext === ".zip") {
     let gpxName = file.name;
@@ -77,7 +84,7 @@ export async function prepareDroppedFile(
     } else {
       data = new Uint8Array(await file.arrayBuffer());
     }
-    if (data.byteLength > GITHUB_MAX_BYTES) throw new Error(uploadTooLargeMessage(gpxName));
+    if (data.byteLength > GIT_MAX_BYTES) throw new Error(gitTooLargeMessage(gpxName));
     const base = sanitizeBasename(gpxName);
     const filename = uniqueFilename(routes, base, ".gpx");
     const title = base.replace(/-/g, " ");
@@ -92,15 +99,15 @@ export async function prepareDroppedFile(
 
   if (ext === ".heic" || ext === ".heif") {
     const jpeg = await convertHeicFile(file);
-    if (jpeg.size > GITHUB_MAX_BYTES) throw new Error(uploadTooLargeMessage(file.name));
     const base = sanitizeBasename(file.name);
     const filename = uniqueFilename(photos, base, ".jpg");
     return {
       filename,
-      repoPath: photoRepoPath(slug, filename),
-      markdown: imageMarkdown(slug, filename, base),
+      markdown: "",
       bytes: new Uint8Array(await jpeg.arrayBuffer()),
       kind: "photo",
+      objectKey: mediaObjectKey(slug, filename),
+      contentType: "image/jpeg",
     };
   }
 
@@ -110,10 +117,11 @@ export async function prepareDroppedFile(
     const filename = uniqueFilename(photos, base, outExt);
     return {
       filename,
-      repoPath: photoRepoPath(slug, filename),
-      markdown: imageMarkdown(slug, filename, base),
+      markdown: "",
       bytes: new Uint8Array(await file.arrayBuffer()),
       kind: "photo",
+      objectKey: mediaObjectKey(slug, filename),
+      contentType: contentTypeFor(outExt),
     };
   }
 
@@ -122,10 +130,11 @@ export async function prepareDroppedFile(
     const filename = uniqueFilename(photos, base, ext);
     return {
       filename,
-      repoPath: photoRepoPath(slug, filename),
-      markdown: videoMarkdown(slug, filename),
+      markdown: "",
       bytes: new Uint8Array(await file.arrayBuffer()),
       kind: "video",
+      objectKey: mediaObjectKey(slug, filename),
+      contentType: contentTypeFor(ext),
     };
   }
 

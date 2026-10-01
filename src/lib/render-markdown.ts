@@ -1,4 +1,5 @@
 import { marked } from "marked";
+import { applySiteBase } from "./github/commit-plan.ts";
 import { listDayDates, listTripSlugs, readDay, readTripMeta, type TripMeta } from "./author";
 
 marked.use({ gfm: true, breaks: true });
@@ -28,12 +29,7 @@ export function publicAsset(url: string | undefined, base = "/"): string | undef
 
 /** Turn a day note into HTML, including TripMap and TripVideo tags. */
 export function renderMarkdown(raw: string, base = "/"): string {
-  const prefix = base.endsWith("/") ? base.slice(0, -1) : base;
-  let text = stripFrontmatter(raw);
-  if (prefix) {
-    text = text.replaceAll("(/trip-media/", `(${prefix}/trip-media/`);
-    text = text.replaceAll('src="/trip-media/', `src="${prefix}/trip-media/`);
-  }
+  let text = applySiteBase(stripFrontmatter(raw), base);
   text = text.replace(/<TripVideo\s+src="([^"]+)"\s*\/?\s*>/g, (_, src: string) => {
     const safe = escapeHtml(src);
     return `<figure class="trip-video"><video controls playsinline preload="metadata" src="${safe}"></video></figure>`;

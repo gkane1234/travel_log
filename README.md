@@ -18,13 +18,67 @@ npm run dev
 
 ## Author
 
-Open `/author/`. The first time, enter a GitHub personal access token and the repo (`owner` / `travel_log`). Those stay in this browser’s localStorage only. They are not in the repo.
+Open `/author/`. The first time, enter a GitHub personal access token and the repo (`gkane1234` / `travel_log`, branch `master`). Those stay in this browser’s localStorage only.
 
-Save day, or drop a photo, video, or GPX, and the page creates one Git commit through the Git Data API. The commit includes the day note and any new files. HEIC photos become JPEG in the browser. JPEG, PNG, and WebP upload as-is. MP4 and smaller MOV files upload as-is. Files over about 100 MB are refused. A failed save leaves the text in the editor.
+Saving a day commits the markdown to GitHub through the Git Data API. GitHub Actions then publishes the site to GitHub Pages. That workflow is `.github/workflows/pages.yml` and still runs on every push to `master`.
 
-After the commit, the Pages workflow rebuilds the public site.
+Photos and videos are not part of that commit. The editor uploads them to object storage first and writes the public `http(s)` URL into the day note. HEIC photos become JPEG in the browser before upload. JPEG, PNG, and WebP upload as-is. MP4, MOV, and WebM upload as-is, including files larger than 100 MB. A failed upload is shown in the editor and is not written into git. GPX files stay in `routes/` and are committed with the note. Nothing over 50 MB is committed.
 
-Create a token at GitHub → Settings → Developer settings → Personal access tokens. Classic tokens need the `repo` scope. Fine-grained tokens need read and write on Contents for this repository.
+Create a GitHub token at Settings → Developer settings → Personal access tokens. Classic tokens need the `repo` scope. Fine-grained tokens need read and write on Contents for this repository.
+
+In the same settings screen, set **Media upload URL** to the Cloudflare Worker address from the section below. Leave **Upload token** blank to send the GitHub token, or paste a separate token that exists only on this device.
+
+## Photos and videos (Cloudflare R2)
+
+The default store is Cloudflare R2. The same Worker speaks S3, so Backblaze B2 is the same setup with different endpoint values. Bucket secrets stay in Worker secrets. They are not in this repo and not in the static site.
+
+Create these, then deploy the Worker in `workers/media`:
+
+1. In the Cloudflare dashboard, create an R2 bucket named `travel-log-media`.
+2. Turn on public access for that bucket (an `r2.dev` subdomain or a custom domain). Copy the public base URL with no trailing slash, for example `https://pub-xxxx.r2.dev`.
+3. Create an R2 API token with Object Read & Write on that bucket. Copy the Access Key ID and Secret Access Key. The S3 endpoint is `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` (account id is on the R2 overview). Do not put the bucket name in the endpoint.
+4. Add a CORS policy on the bucket so the browser can `PUT` the file. Allow origins `https://gkane1234.github.io` and `http://localhost:4321`, method `PUT`, and header `content-type`.
+
+From `workers/media`:
+
+```bash
+npm install
+npx wrangler login
+npx wrangler secret put S3_ENDPOINT
+npx wrangler secret put S3_BUCKET
+npx wrangler secret put S3_ACCESS_KEY_ID
+npx wrangler secret put S3_SECRET_ACCESS_KEY
+npx wrangler secret put S3_REGION
+npx wrangler secret put PUBLIC_BASE_URL
+npx wrangler secret put GITHUB_REPOSITORY
+npx wrangler secret put UPLOAD_TOKEN
+npx wrangler deploy
+```
+
+Enter these values when prompted:
+
+- `S3_ENDPOINT`: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
+- `S3_BUCKET`: `travel-log-media`
+- `S3_REGION`: `auto`
+- `PUBLIC_BASE_URL`: the public base from step 2
+- `GITHUB_REPOSITORY`: `gkane1234/travel_log`
+- `UPLOAD_TOKEN`: optional. If you set it, put the same value in the author page’s Upload token field. If you leave it empty, the editor sends the GitHub token and the Worker checks that token can read this repo.
+
+`npx wrangler deploy` prints the Worker URL. Paste that into **Media upload URL** on the author page (no path, no trailing slash).
+
+If any of those secrets are missing, the Worker refuses the upload. The editor then shows the error and does not add the image or video to the git commit.
+
+### Backblaze B2
+
+Use the same commands and change the secrets:
+
+- `S3_ENDPOINT`: `https://s3.<region>.backblazeb2.com`
+- `S3_REGION`: that region, such as `us-west-004`
+- `S3_BUCKET`: the B2 bucket name
+- `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`: a B2 application key that can write the bucket
+- `PUBLIC_BASE_URL`: the public URL prefix where objects are readable, with no trailing slash
+
+The bucket still needs a CORS rule that allows `PUT` from the Pages origin.
 
 ## Install
 
@@ -38,8 +92,8 @@ Create a token at GitHub → Settings → Developer settings → Personal access
 trips/<slug>/
   index.md              # title, dates, location, summary
   days/YYYY-MM-DD.mdx   # one file per day
-  photos/
-  routes/
+  photos/               # older pictures already in git; new ones are not added here
+  routes/               # GPX files, still committed
 ```
 
 Your raw “Olympic Peninsula” source folder is left alone; copy media into a trip through Author when you are ready.

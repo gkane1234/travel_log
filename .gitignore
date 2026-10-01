@@ -20,3 +20,6 @@ Olympic Peninsula/
 
 # scratch logs from local debugging
 second-dev-*.txt
+
+workers/media/.dev.vars
+workers/media/node_modules/

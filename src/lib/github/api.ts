@@ -1,4 +1,4 @@
-import { buildCommitRequest, buildTreeRequest, bytesToBase64 } from "./commit-plan.ts";
+import { assertGitCommitFiles, buildCommitRequest, buildTreeRequest, bytesToBase64 } from "./commit-plan.ts";
 import type { GithubSettings } from "./settings.ts";
 
 export class GithubError extends Error {
@@ -107,6 +107,7 @@ export async function commitFiles(
   files: { path: string; bytes: Uint8Array }[],
   tip: BranchTip,
 ): Promise<BranchTip> {
+  assertGitCommitFiles(files);
   const blobs: { path: string; sha: string }[] = [];
   for (const file of files) {
     const response = await gh(settings, `${repoPath(settings)}/git/blobs`, {

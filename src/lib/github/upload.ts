@@ -1,7 +1,8 @@
-/** Origin only. A pasted /travel_log suffix is removed so the sign path is not doubled. */
+/** Origin only. A pasted /travel-log suffix is removed so the sign path is not doubled. */
 export function mediaWorkerOrigin(workerUrl: string): string {
   let base = workerUrl.trim().replace(/\/$/, "");
-  if (base.endsWith("/travel_log")) base = base.slice(0, -"/travel_log".length);
+  if (base.endsWith("/travel-log")) base = base.slice(0, -"/travel-log".length);
+  else if (base.endsWith("/travel_log")) base = base.slice(0, -"/travel_log".length);
   return base;
 }
 
@@ -30,7 +31,7 @@ export async function uploadToBucket(options: {
 
   let signed: SignedUpload;
   try {
-    const response = await fetch(`${workerUrl}/travel_log/sign`, {
+    const response = await fetch(`${workerUrl}/travel-log/sign`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${options.token}`,

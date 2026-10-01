@@ -22,12 +22,17 @@ export function storageConfigError(env) {
   return `Media storage is not configured (${missing.join(", ")}).`;
 }
 
-export const PUBLIC_PREFIX = "/travel_log";
+export const PUBLIC_PREFIX = "/travel-log";
 
-export function mediaPublicUrl(base, key) {
+export function siteOrigin(base) {
   let origin = String(base || "").trim().replace(/\/$/, "");
   if (origin.endsWith(PUBLIC_PREFIX)) origin = origin.slice(0, -PUBLIC_PREFIX.length);
-  return `${origin}${PUBLIC_PREFIX}/${key}`;
+  else if (origin.endsWith("/travel_log")) origin = origin.slice(0, -"/travel_log".length);
+  return origin;
+}
+
+export function mediaPublicUrl(base, key) {
+  return `${siteOrigin(base)}${PUBLIC_PREFIX}/${key}`;
 }
 
 const KEY = /^media\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9][a-z0-9._-]{0,120}$/;

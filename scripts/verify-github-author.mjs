@@ -129,14 +129,15 @@ const login = await checkLogin({ password: "not-a-real-secret" }, mediaEnv);
 assert.equal(login.ok, true);
 assert.match(login.cookie, /HttpOnly/);
 assert.match(login.cookie, /Secure/);
-assert.match(login.cookie, /Path=\/travel_log/);
+assert.match(login.cookie, /Path=\/travel-log/);
 assert.match(login.cookie, /SameSite=Lax/);
 assert.equal(
   mediaPublicUrl("https://gabriel-kane.com", "media/olympic-peninsula/shore.jpg"),
-  "https://gabriel-kane.com/travel_log/media/olympic-peninsula/shore.jpg",
+  "https://gabriel-kane.com/travel-log/media/olympic-peninsula/shore.jpg",
 );
+assert.equal(mediaWorkerOrigin("https://gabriel-kane.com/travel-log"), "https://gabriel-kane.com");
 assert.equal(mediaWorkerOrigin("https://gabriel-kane.com/travel_log"), "https://gabriel-kane.com");
-assert.equal(`${mediaWorkerOrigin("https://gabriel-kane.com")}/travel_log/sign`, "https://gabriel-kane.com/travel_log/sign");
+assert.equal(`${mediaWorkerOrigin("https://gabriel-kane.com")}/travel-log/sign`, "https://gabriel-kane.com/travel-log/sign");
 const allowed = await respondToMediaGet(
   new Request("https://trips.example/media/olympic-peninsula/shore.jpg", {
     headers: { Cookie: login.cookie.split(";")[0] },

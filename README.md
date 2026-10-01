@@ -34,9 +34,9 @@ The default store is a private Cloudflare R2 bucket. The same Worker speaks S3, 
 
 Trip notes and GitHub Pages stay public. This repo was not made private, and the Pages workflow is unchanged. Anyone who can open github.com or `https://gkane1234.github.io/travel_log/` can read the notes. A photo login does not hide the notes. Make the GitHub repo private yourself if the notes should not be on github.com. GitHub Pages on a public repo stays public either way.
 
-Photos and videos are not public. The bucket has no r2.dev URL in the notes. A day note stores a URL on your Cloudflare site, such as `https://gabriel-kane.com/travel_log/media/olympic-peninsula/shore.jpg`. The Worker returns that file only when the browser sends the photo-login cookie. A direct link without the cookie gets 401.
+Photos and videos are not public. The bucket has no r2.dev URL in the notes. A day note stores a URL on your Cloudflare site, such as `https://gabriel-kane.com/travel-log/media/olympic-peninsula/shore.jpg`. The Worker returns that file only when the browser sends the photo-login cookie. A direct link without the cookie gets 401.
 
-That cookie is first-party only. It is set when you sign in at `/travel_log/login` on gabriel-kane.com, with `Path=/travel_log` and `SameSite=Lax`. It is not sent when a github.io page loads images from a different host, so pictures on GitHub Pages stay locked. View photos on https://gabriel-kane.com, where the pages and `/travel_log/media` are the same site.
+That cookie is first-party only. It is set when you sign in at `/travel-log/login` on gabriel-kane.com, with `Path=/travel-log` and `SameSite=Lax`. It is not sent when a github.io page loads images from a different host, so pictures on GitHub Pages stay locked. View photos on https://gabriel-kane.com, where the pages and `/travel-log/media` are the same site.
 
 Create these, then deploy the Worker in `workers/media`:
 
@@ -44,11 +44,11 @@ Create these, then deploy the Worker in `workers/media`:
 2. Create an R2 API token with Object Read & Write on that bucket. Copy the Access Key ID and Secret Access Key. The S3 endpoint is `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. Do not put the bucket name in the endpoint.
 3. Add a CORS policy on the bucket so the browser can `PUT` an upload. Allow your Cloudflare site origin and `http://localhost:4321`, method `PUT`, and header `content-type`. Do not allow public `GET`.
 4. Put the Worker on gabriel-kane.com with these routes, and remove `gabriel-kane.com/media/*` and `gabriel-kane.com/login`:
-   - `gabriel-kane.com/travel_log/media/*`
-   - `gabriel-kane.com/travel_log/login`
-   - `gabriel-kane.com/travel_log/sign`
-   - `gabriel-kane.com/travel_log`
-   Set `MEDIA_BASE_URL` to `https://gabriel-kane.com` with no path. The Worker adds `/travel_log` itself.
+   - `gabriel-kane.com/travel-log/media/*`
+   - `gabriel-kane.com/travel-log/login`
+   - `gabriel-kane.com/travel-log/sign`
+   - `gabriel-kane.com/travel-log`
+   Set `MEDIA_BASE_URL` to `https://gabriel-kane.com` with no path. The Worker adds `/travel-log` itself. Remove any `travel_log` routes.
 
 Cloudflare Workers Builds, with the Git repo connected, uses these fields:
 
@@ -89,9 +89,9 @@ Enter these values when prompted:
 - `GITHUB_REPOSITORY`: `gkane1234/travel_log`
 - `UPLOAD_TOKEN`: optional. If you set it, put the same value in the author page’s Upload token field. If you leave it empty, the editor sends the GitHub token and the Worker checks that token can read this repo.
 
-Uploads still use that GitHub token or `UPLOAD_TOKEN`. Viewing uses `MEDIA_PASSWORD` only. Open https://gabriel-kane.com/travel_log/login and submit the password. `GET /travel_log` redirects there. The Worker sets an httpOnly Secure cookie for `/travel_log`. It does not check a password that ships in the page. Do not route the whole site to this Worker. Trip notes stay on the public site. Old `/login` and `/media` requests are not served as files.
+Uploads still use that GitHub token or `UPLOAD_TOKEN`. Viewing uses `MEDIA_PASSWORD` only. Open https://gabriel-kane.com/travel-log/login and submit the password. `GET /travel-log` redirects there. The Worker sets an httpOnly Secure cookie for `/travel-log`. It does not check a password that ships in the page. Do not route the whole site to this Worker. Trip notes stay on the public site. Old `/login`, `/media`, and `/travel_log` requests are not served as files.
 
-`npx wrangler deploy` prints a workers.dev URL. Prefer https://gabriel-kane.com, and paste that origin into **Media upload URL** on the author page (no path, no trailing slash). The editor calls `/travel_log/sign`. The note will point at `https://gabriel-kane.com/travel_log/media/...`, which the Worker serves.
+`npx wrangler deploy` prints a workers.dev URL. Prefer https://gabriel-kane.com, and paste that origin into **Media upload URL** on the author page (no path, no trailing slash). The editor calls `/travel-log/sign`. The note will point at `https://gabriel-kane.com/travel-log/media/...`, which the Worker serves.
 
 If any required secret is missing, the Worker refuses the upload and refuses to hand out the file. The editor then shows the error and does not add the image or video to the git commit.
 

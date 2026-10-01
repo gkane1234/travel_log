@@ -1,5 +1,5 @@
 import { AwsClient } from "aws4fetch";
-import { isAllowedKey, isAllowedType, mediaPublicUrl, storageConfigError } from "./config.js";
+import { PUBLIC_PREFIX, isAllowedKey, isAllowedType, mediaPublicUrl, siteOrigin, storageConfigError } from "./config.js";
 import { checkLogin, loginPage, respondToMediaGet } from "./gate.js";
 
 function json(body, status, extra = {}) {
@@ -114,27 +114,37 @@ export default {
     const path = requestPath(url);
 
     if (request.method === "GET" && (path === "/" || path === "/login")) {
-      return redirect("/travel_log/login");
+      return redirect(`${PUBLIC_PREFIX}/login`);
     }
     if (request.method === "GET" && url.pathname.startsWith("/media/")) {
-      return redirect(`/travel_log${url.pathname}${url.search}`);
+      return redirect(`${PUBLIC_PREFIX}${url.pathname}${url.search}`);
     }
     if (request.method === "POST" && path === "/login") {
-      return json({ error: "Sign in with POST /travel_log/login." }, 404);
+      return json({ error: `Sign in with POST ${PUBLIC_PREFIX}/login.` }, 404);
     }
     if (request.method === "POST" && path === "/sign") {
-      return cors(json({ error: "Upload signing moved to POST /travel_log/sign." }, 404));
+      return cors(json({ error: `Upload signing moved to POST ${PUBLIC_PREFIX}/sign.` }, 404));
+    }
+    if (request.method === "GET" && (path === "/travel_log" || path.startsWith("/travel_log/"))) {
+      const next = `${PUBLIC_PREFIX}${path.slice("/travel_log".length)}${url.search}`;
+      return redirect(next === PUBLIC_PREFIX ? `${PUBLIC_PREFIX}/login` : next);
+    }
+    if (request.method === "POST" && (path === "/travel_log/login" || path === "/travel_log/sign")) {
+      const message = path.endsWith("/sign")
+        ? `Upload signing moved to POST ${PUBLIC_PREFIX}/sign.`
+        : `Sign in with POST ${PUBLIC_PREFIX}/login.`;
+      return path.endsWith("/sign") ? cors(json({ error: message }, 404)) : json({ error: message }, 404);
     }
 
-    if (request.method === "GET" && path === "/travel_log") {
-      return redirect("/travel_log/login");
+    if (request.method === "GET" && path === PUBLIC_PREFIX) {
+      return redirect(`${PUBLIC_PREFIX}/login`);
     }
 
-    if (request.method === "GET" && path === "/travel_log/login") {
+    if (request.method === "GET" && path === `${PUBLIC_PREFIX}/login`) {
       return loginPage();
     }
 
-    if (request.method === "POST" && path === "/travel_log/login") {
+    if (request.method === "POST" && path === `${PUBLIC_PREFIX}/login`) {
       let body;
       try {
         body = await readLoginBody(request);
@@ -145,11 +155,10 @@ export default {
       if (!result.ok) return json({ error: result.error }, result.status);
       const type = request.headers.get("Content-Type") || "";
       if (type.includes("application/x-www-form-urlencoded") || type.includes("multipart/form-data")) {
-        const origin = mediaPublicUrl(env.MEDIA_BASE_URL || "", "").replace(/\/travel_log\/$/, "") || "/";
         return new Response(null, {
           status: 303,
           headers: {
-            Location: origin,
+            Location: siteOrigin(env.MEDIA_BASE_URL) || "/",
             "Set-Cookie": result.cookie,
           },
         });
@@ -157,12 +166,12 @@ export default {
       return json({ ok: true }, 200, { "Set-Cookie": result.cookie });
     }
 
-    if (request.method === "GET" && url.pathname.startsWith("/travel_log/media/")) {
+    if (request.method === "GET" && url.pathname.startsWith(`${PUBLIC_PREFIX}/media/`)) {
       const denied = await respondToMediaGet(request, env);
       if (denied) return denied;
       const configError = storageConfigError(env);
       if (configError) return json({ error: configError }, 503);
-      const key = decodeURIComponent(url.pathname.slice("/travel_log/".length));
+      const key = decodeURIComponent(url.pathname.slice(`${PUBLIC_PREFIX}/`.length));
       if (!isAllowedKey(key)) return json({ error: "Not found" }, 404);
       try {
         return await readPrivateObject(env, key);
@@ -171,7 +180,7 @@ export default {
       }
     }
 
-    if (request.method !== "POST" || path !== "/travel_log/sign") {
+    if (request.method !== "POST" || path !== `${PUBLIC_PREFIX}/sign`) {
       return cors(json({ error: "Not found" }, 404));
     }
 

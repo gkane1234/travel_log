@@ -1,0 +1,21 @@
+# build
+dist/
+.astro/
+
+# deps
+node_modules/
+
+# env
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# authoring originals (converted copies live in trips/)
+Olympic Peninsula/
+
+# scratch logs from local debugging
+second-dev-*.txt

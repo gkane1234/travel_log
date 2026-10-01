@@ -1,0 +1,60 @@
+diff --git a/node_modules/astro/dist/content/mutable-data-store.js b/node_modules/astro/dist/content/mutable-data-store.js
+index d8ec675..16a2b1d 100644
+--- a/node_modules/astro/dist/content/mutable-data-store.js
++++ b/node_modules/astro/dist/content/mutable-data-store.js
+@@ -1,4 +1,5 @@
+ import { existsSync, promises as fs } from "node:fs";
++import { randomBytes } from "node:crypto";
+ import * as devalue from "devalue";
+ import { Traverse } from "neotraverse/modern";
+ import { imageSrcToImportId, importIdToSymbolName } from "../assets/utils/resolveImports.js";
+@@ -8,6 +9,7 @@ import { ImmutableDataStore } from "./data-store.js";
+ import { contentModuleToId } from "./utils.js";
+ const SAVE_DEBOUNCE_MS = 500;
+ const MAX_DEPTH = 10;
++const RENAME_RETRIES = 5;
+ class MutableDataStore extends ImmutableDataStore {
+   #file;
+   #assetsFile;
+@@ -204,14 +206,39 @@ ${lines.join(",\n")}]);
+       return;
+     }
+     this.#writing.add(fileKey);
+-    const tempFile = filePath instanceof URL ? new URL(`${filePath.href}.tmp`) : `${filePath}.tmp`;
++    // Unique temp name: deterministic `.tmp` races with watchers / second
++    // astro dev on Windows (ENOENT on rename). See withastro/astro#15671.
++    const suffix = randomBytes(6).toString("hex");
++    const tempFile = filePath instanceof URL ? new URL(`${filePath.href}.${suffix}.tmp`) : `${filePath}.${suffix}.tmp`;
+     try {
+       const oldData = await fs.readFile(filePath, "utf-8").catch(() => "");
+       if (oldData === data) {
+         return;
+       }
+       await fs.writeFile(tempFile, data);
+-      await fs.rename(tempFile, filePath);
++      let lastErr;
++      for (let attempt = 0; attempt < RENAME_RETRIES; attempt++) {
++        try {
++          if (!existsSync(tempFile)) {
++            await fs.writeFile(tempFile, data);
++          }
++          await fs.rename(tempFile, filePath);
++          lastErr = undefined;
++          break;
++        } catch (err) {
++          lastErr = err;
++          const code = err && typeof err === "object" && "code" in err ? err.code : "";
++          if (code !== "ENOENT" && code !== "EPERM" && code !== "EACCES") {
++            throw err;
++          }
++          await new Promise((r) => setTimeout(r, 20 * (attempt + 1)));
++        }
++      }
++      if (lastErr) throw lastErr;
++    } catch (err) {
++      await fs.unlink(tempFile).catch(() => {
++      });
++      throw err;
+     } finally {
+       this.#writing.delete(fileKey);
+       if (this.#pending.has(fileKey)) {

@@ -1,0 +1,24 @@
+---
+interface Props {
+  src: string;
+}
+
+const { src } = Astro.props;
+---
+
+<figure class="trip-video">
+  <video controls playsinline preload="metadata" src={src}>
+    <a href={src}>Download video</a>
+  </video>
+</figure>
+
+<style>
+  .trip-video {
+    margin: 1.75rem 0;
+  }
+  video {
+    display: block;
+    width: 100%;
+    background: #111;
+  }
+</style>

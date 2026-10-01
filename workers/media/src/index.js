@@ -1,6 +1,6 @@
 import { AwsClient } from "aws4fetch";
-import { PUBLIC_PREFIX, isAllowedKey, isAllowedType, mediaPublicUrl, siteOrigin, storageConfigError } from "./config.js";
-import { checkLogin, loginPage, respondToMediaGet } from "./gate.js";
+import { PUBLIC_PREFIX, isAllowedKey, isAllowedType, mediaPublicUrl, storageConfigError } from "./config.js";
+import { checkLogin, loginPage, mediaGate, safeNext } from "./gate.js";
 
 function json(body, status, extra = {}) {
   return new Response(JSON.stringify(body), {
@@ -107,6 +107,49 @@ function requestPath(url) {
   return url.pathname.replace(/\/+$/, "") || "/";
 }
 
+function loginRedirect(url) {
+  const next = `${url.pathname}${url.search}`;
+  return redirect(`${PUBLIC_PREFIX}/login?next=${encodeURIComponent(next)}`);
+}
+
+function pagesTarget(env, pathname, search) {
+  const repo = String(env.GITHUB_REPOSITORY || "gkane1234/travel_log");
+  const [owner, name] = repo.split("/");
+  let rest = pathname.slice(PUBLIC_PREFIX.length);
+  if (!rest) rest = "/";
+  return `https://${owner}.github.io/${name}${rest}${search}`;
+}
+
+function rewritePublished(body, origin, owner, repoName) {
+  const pagesRoot = `https://${owner}.github.io/${repoName}/`;
+  return body
+    .replaceAll(pagesRoot, `${origin}${PUBLIC_PREFIX}/`)
+    .replaceAll(`/${repoName}/`, `${PUBLIC_PREFIX}/`);
+}
+
+async function proxyTravelLog(request, env, url) {
+  const [owner, repoName] = String(env.GITHUB_REPOSITORY || "gkane1234/travel_log").split("/");
+  const upstream = await fetch(pagesTarget(env, url.pathname, url.search), {
+    method: "GET",
+    redirect: "follow",
+    headers: { Accept: request.headers.get("Accept") || "*/*", "User-Agent": "travel-log-media" },
+  });
+  const type = upstream.headers.get("content-type") || "";
+  const textLike = /text\/|javascript|json|xml|manifest/.test(type);
+  if (!textLike) {
+    const headers = new Headers(upstream.headers);
+    headers.set("Cache-Control", "private, no-store");
+    headers.delete("set-cookie");
+    return new Response(upstream.body, { status: upstream.status, headers });
+  }
+  const body = rewritePublished(await upstream.text(), url.origin, owner, repoName || "travel_log");
+  const headers = new Headers();
+  headers.set("Content-Type", type);
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return new Response(body, { status: upstream.status, headers });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
@@ -136,12 +179,30 @@ export default {
       return path.endsWith("/sign") ? cors(json({ error: message }, 404)) : json({ error: message }, 404);
     }
 
-    if (request.method === "GET" && path === PUBLIC_PREFIX) {
-      return redirect(`${PUBLIC_PREFIX}/login`);
-    }
-
-    if (request.method === "GET" && path === `${PUBLIC_PREFIX}/login`) {
-      return loginPage();
+    const underLog = path === PUBLIC_PREFIX || path.startsWith(`${PUBLIC_PREFIX}/`);
+    if (underLog && request.method === "GET" && path !== `${PUBLIC_PREFIX}/sign`) {
+      const session = await mediaGate(request, env);
+      const destination = safeNext(url.searchParams.get("next")) || `${PUBLIC_PREFIX}/`;
+      if (path === `${PUBLIC_PREFIX}/login`) {
+        if (session.ok) return redirect(destination);
+        return loginPage(url.searchParams.get("next"));
+      }
+      if (!session.ok) {
+        if (session.status === 503) return json({ error: session.error }, 503);
+        return loginRedirect(url);
+      }
+      if (url.pathname.startsWith(`${PUBLIC_PREFIX}/media/`)) {
+        const configError = storageConfigError(env);
+        if (configError) return json({ error: configError }, 503);
+        const key = decodeURIComponent(url.pathname.slice(`${PUBLIC_PREFIX}/`.length));
+        if (!isAllowedKey(key)) return json({ error: "Not found" }, 404);
+        try {
+          return await readPrivateObject(env, key);
+        } catch {
+          return json({ error: "Could not read that file." }, 502);
+        }
+      }
+      return proxyTravelLog(request, env, url);
     }
 
     if (request.method === "POST" && path === `${PUBLIC_PREFIX}/login`) {
@@ -154,30 +215,17 @@ export default {
       const result = await checkLogin(body, env);
       if (!result.ok) return json({ error: result.error }, result.status);
       const type = request.headers.get("Content-Type") || "";
+      const destination = safeNext(url.searchParams.get("next")) || `${PUBLIC_PREFIX}/`;
       if (type.includes("application/x-www-form-urlencoded") || type.includes("multipart/form-data")) {
         return new Response(null, {
           status: 303,
           headers: {
-            Location: siteOrigin(env.MEDIA_BASE_URL) || "/",
+            Location: destination,
             "Set-Cookie": result.cookie,
           },
         });
       }
       return json({ ok: true }, 200, { "Set-Cookie": result.cookie });
-    }
-
-    if (request.method === "GET" && url.pathname.startsWith(`${PUBLIC_PREFIX}/media/`)) {
-      const denied = await respondToMediaGet(request, env);
-      if (denied) return denied;
-      const configError = storageConfigError(env);
-      if (configError) return json({ error: configError }, 503);
-      const key = decodeURIComponent(url.pathname.slice(`${PUBLIC_PREFIX}/`.length));
-      if (!isAllowedKey(key)) return json({ error: "Not found" }, 404);
-      try {
-        return await readPrivateObject(env, key);
-      } catch {
-        return json({ error: "Could not read that file." }, 502);
-      }
     }
 
     if (request.method !== "POST" || path !== `${PUBLIC_PREFIX}/sign`) {

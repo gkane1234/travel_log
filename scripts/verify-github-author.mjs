@@ -12,7 +12,7 @@ import { convertHeicFile } from "../src/lib/github/media.ts";
 import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
 import { mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
 import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
-import { checkLogin, respondToMediaGet } from "../workers/media/src/gate.js";
+import { checkLogin, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
 import sharp from "sharp";
 
 const day = dayRepoPath("olympic-peninsula", "2026-09-08");
@@ -151,6 +151,9 @@ const allowed = await respondToMediaGet(
   mediaEnv,
 );
 assert.equal(allowed, null);
+assert.equal(safeNext("/travel-log/trips/olympic-peninsula/"), "/travel-log/trips/olympic-peninsula/");
+assert.equal(safeNext("/travel-log/login"), "");
+assert.equal(safeNext("https://evil.example"), "");
 
 let failed = false;
 try {

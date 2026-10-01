@@ -31,6 +31,14 @@ export function loginSetCookie(token) {
   return `${MEDIA_COOKIE}=${token}; HttpOnly; Secure; Path=/travel-log; SameSite=Lax; Max-Age=2592000`;
 }
 
+export function safeNext(value) {
+  const next = String(value || "");
+  if (!next.startsWith("/travel-log")) return "";
+  if (next.startsWith("//") || next.includes("\\") || next.includes("://")) return "";
+  if (next === "/travel-log/login" || next.startsWith("/travel-log/login?")) return "";
+  return next;
+}
+
 export async function mediaGate(request, env) {
   const password = String(env?.MEDIA_PASSWORD || "");
   if (!password) {
@@ -74,18 +82,20 @@ export async function checkLogin(body, env) {
   return { ok: true, cookie: loginSetCookie(await sessionToken(password)) };
 }
 
-export function loginPage() {
+export function loginPage(next) {
+  const safe = safeNext(next);
+  const action = safe ? `/travel-log/login?next=${encodeURIComponent(safe)}` : "/travel-log/login";
   const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Photo login</title>
+  <title>Travel log login</title>
 </head>
 <body>
-  <h1>Photo login</h1>
-  <p>Trip notes stay readable without this. Photos and videos need this sign-in.</p>
-  <form method="post" action="/travel-log/login">
+  <h1>Travel log</h1>
+  <p>Sign in to open the travel log.</p>
+  <form method="post" action="${action}">
     <label>Username <input name="username" autocomplete="username" required /></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
     <button type="submit">Sign in</button>

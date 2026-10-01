@@ -43,12 +43,7 @@ Create these, then deploy the Worker in `workers/media`:
 1. In the Cloudflare dashboard, create an R2 bucket named `travel-log-media`. Leave public access off.
 2. Create an R2 API token with Object Read & Write on that bucket. Copy the Access Key ID and Secret Access Key. The S3 endpoint is `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. Do not put the bucket name in the endpoint.
 3. Add a CORS policy on the bucket so the browser can `PUT` an upload. Allow your Cloudflare site origin and `http://localhost:4321`, method `PUT`, and header `content-type`. Do not allow public `GET`.
-4. Put the Worker on gabriel-kane.com with these routes, and remove `gabriel-kane.com/media/*` and `gabriel-kane.com/login`:
-   - `gabriel-kane.com/travel-log/media/*`
-   - `gabriel-kane.com/travel-log/login`
-   - `gabriel-kane.com/travel-log/sign`
-   - `gabriel-kane.com/travel-log`
-   Set `MEDIA_BASE_URL` to `https://gabriel-kane.com` with no path. The Worker adds `/travel-log` itself. Remove any `travel_log` routes.
+4. Put the Worker on gabriel-kane.com with one route: `gabriel-kane.com/travel-log*`. Remove the older separate `/media`, `/login`, and `/travel_log` routes. This route covers the login page, the photos, and the trip pages. Set `MEDIA_BASE_URL` to `https://gabriel-kane.com` with no path. The Worker adds `/travel-log` itself.
 
 Cloudflare Workers Builds, with the Git repo connected, uses these fields:
 
@@ -87,7 +82,7 @@ Enter these values when prompted:
 - `GITHUB_REPOSITORY`: `gkane1234/travel_log`
 - `UPLOAD_TOKEN`: optional. If you set it, put the same value in the author page’s Upload token field. If you leave it empty, the editor sends the GitHub token and the Worker checks that token can read this repo.
 
-Uploads still use that GitHub token or `UPLOAD_TOKEN`. Viewing uses username `jumbo` or `gumbo` plus `MEDIA_PASSWORD`. Open https://gabriel-kane.com/travel-log/login and sign in. `GET /travel-log` redirects there. The Worker sets an httpOnly Secure cookie for `/travel-log`. It does not check a password that ships in the page. Do not route the whole site to this Worker. Trip notes stay on the public site. Old `/login`, `/media`, and `/travel_log` requests are not served as files.
+Uploads still use that GitHub token or `UPLOAD_TOKEN`. Opening any `https://gabriel-kane.com/travel-log` address without a sign-in shows the login screen. Sign in as `jumbo` or `gumbo` with `MEDIA_PASSWORD`. After that, the Worker serves the trip pages and the private photos. The cookie is httpOnly, Secure, and limited to `/travel-log`. Do not route the rest of gabriel-kane.com to this Worker. Old `/login`, `/media`, and `/travel_log` requests are not served as files.
 
 `npx wrangler deploy` prints a workers.dev URL. Prefer https://gabriel-kane.com, and paste that origin into **Media upload URL** on the author page (no path, no trailing slash). The editor calls `/travel-log/sign`. The note will point at `https://gabriel-kane.com/travel-log/media/...`, which the Worker serves.
 

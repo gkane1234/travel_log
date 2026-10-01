@@ -1,6 +1,6 @@
 ---
 import BaseLayout from "@layouts/BaseLayout.astro";
-import { listPublicTrips, loadPublicTrip } from "@lib/render-markdown";
+import { listPublicTrips, loadPublicTrip, publicAsset } from "@lib/render-markdown";
 import { formatTripDates, parseDateString } from "@lib/trips";
 
 export async function getStaticPaths() {
@@ -20,6 +20,7 @@ const { meta, introHtml, days } = page;
   <article class="prose">
     <p class="meta"><a href={base}>← Trips</a></p>
     <h1>{meta.title}</h1>
+    {meta.cover ? <img class="trip-cover" src={publicAsset(meta.cover, base)} alt="" /> : null}
     <p class="meta">
       {
         [

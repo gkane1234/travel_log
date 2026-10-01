@@ -8,6 +8,7 @@ import convert from "heic-convert";
 import sharp from "sharp";
 import JSZip from "jszip";
 import ffmpegPath from "ffmpeg-static";
+import { photoPathsInMarkdown } from "./github/commit-plan.ts";
 
 function projectRoot(): string {
   const cwd = process.cwd();
@@ -130,6 +131,26 @@ export async function readTripMeta(slug: string): Promise<TripMeta> {
     cover: data.cover ? String(data.cover) : undefined,
     draft: data.draft !== false,
   };
+}
+
+/** First photo in the earliest day note, or the first image file in photos/. */
+export async function firstTripPhoto(slug: string): Promise<string | undefined> {
+  assertSafeSlug(slug);
+  const dates = await listDayDates(slug);
+  for (const date of dates) {
+    const day = await readDay(slug, date);
+    const found = photoPathsInMarkdown(slug, day.body)[0];
+    if (found) return found;
+  }
+  try {
+    const names = (await fs.readdir(path.join(tripDir(slug), "photos")))
+      .filter((name) => /\.(jpe?g|png|gif|webp)$/i.test(name))
+      .sort();
+    if (names[0]) return `/trip-media/${slug}/photos/${names[0]}`;
+  } catch {
+    /* no photos folder */
+  }
+  return undefined;
 }
 
 export async function listTripSlugs(): Promise<string[]> {

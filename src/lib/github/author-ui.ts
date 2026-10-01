@@ -6,6 +6,7 @@ import {
   imageMarkdownUrl,
   indexRepoPath,
   indexTrips,
+  photoPathsInMarkdown,
   saveDayMessage,
   videoMarkdownUrl,
 } from "./commit-plan.ts";
@@ -13,7 +14,7 @@ import { addDays, slugify } from "./dates.ts";
 import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip } from "./frontmatter.ts";
 import { prepareDroppedFile } from "./media.ts";
 import { clearSettings, loadSettings, saveSettings, type GithubSettings } from "./settings.ts";
-import { uploadToBucket } from "./upload.ts";
+import { saveTripCover, uploadToBucket } from "./upload.ts";
 
 type Tip = { commitSha: string; treeSha: string };
 type PreparedRoute = { repoPath: string; bytes: Uint8Array };
@@ -79,6 +80,8 @@ export function mountAuthor(root: HTMLElement): void {
   const gpxInput = must<HTMLInputElement>(root, "gpx-input");
   const viewLink = must<HTMLAnchorElement>(root, "view-link");
   const publishBtn = must<HTMLButtonElement>(root, "publish-trip");
+  const coverSelect = must<HTMLSelectElement>(root, "cover-select");
+  const saveCoverBtn = must<HTMLButtonElement>(root, "save-cover");
 
   function show(name: keyof typeof screens): void {
     for (const [key, el] of Object.entries(screens)) {
@@ -190,6 +193,74 @@ export function mountAuthor(root: HTMLElement): void {
       .join(" · ");
     viewLink.href = `${base}trips/${trip.slug}/`;
     publishBtn.textContent = trip.draft ? "Show on the public site" : "Hide from the public site";
+    if (trip.cover && ![...coverSelect.options].some((option) => option.value === trip.cover)) {
+      const option = document.createElement("option");
+      option.value = trip.cover;
+      option.textContent = trip.cover.split("/").pop() || trip.cover;
+      coverSelect.append(option);
+    }
+    coverSelect.value = trip.cover || "";
+  }
+
+  function fillCoverSelect(paths: string[]): void {
+    const current = trip?.cover || "";
+    coverSelect.replaceChildren();
+    const automatic = document.createElement("option");
+    automatic.value = "";
+    automatic.textContent = "First photo in the trip";
+    coverSelect.append(automatic);
+    for (const path of paths) {
+      const option = document.createElement("option");
+      option.value = path;
+      option.textContent = path.split("/").pop() || path;
+      coverSelect.append(option);
+    }
+    if (current && !paths.includes(current)) {
+      const option = document.createElement("option");
+      option.value = current;
+      option.textContent = current.split("/").pop() || current;
+      coverSelect.append(option);
+    }
+    coverSelect.value = current;
+  }
+
+  async function refreshCoverChoices(): Promise<void> {
+    if (!settings || !trip) return;
+    const found: string[] = [];
+    const add = (markdown: string) => {
+      for (const path of photoPathsInMarkdown(trip!.slug, markdown)) {
+        if (!found.includes(path)) found.push(path);
+      }
+    };
+    for (const date of [...trip.dayDates].sort()) {
+      if (date === currentDate) continue;
+      const raw = await readTextFile(settings, dayPath(trip.slug, date));
+      add(raw ?? "");
+    }
+    add(bodyEl.value);
+    fillCoverSelect(found);
+  }
+
+  async function persistCover(cover: string): Promise<string> {
+    if (!settings || !trip) throw new Error("Open a trip first.");
+    const raw = await readTextFile(settings, trip.indexPath);
+    if (raw == null) throw new Error("Could not read the trip index.");
+    const parsed = parseFrontmatter(raw);
+    if (cover) parsed.data.cover = cover;
+    else delete parsed.data.cover;
+    await commit(`Set thumbnail for ${trip.title}`, [
+      { path: trip.indexPath, bytes: textBytes(stringifyFrontmatter(parsed.data, parsed.body)) },
+    ]);
+    trip = { ...trip, cover: cover || undefined };
+    renderTripMeta();
+    if (!settings.mediaWorkerUrl) return "";
+    await saveTripCover({
+      workerUrl: settings.mediaWorkerUrl,
+      token: settings.uploadToken || settings.token,
+      slug: trip.slug,
+      cover,
+    });
+    return "";
   }
 
   async function loadDay(date: string, options: { saveFirst?: boolean } = {}): Promise<void> {
@@ -208,6 +279,7 @@ export function mountAuthor(root: HTMLElement): void {
     url.searchParams.set("trip", trip.slug);
     url.searchParams.set("date", date);
     history.replaceState({}, "", url);
+    await refreshCoverChoices();
     setStatus(`Editing ${date}. Save sends this day to GitHub.`);
   }
 
@@ -266,21 +338,46 @@ export function mountAuthor(root: HTMLElement): void {
     }
   }
 
-  async function saveWithFiles(routes: PreparedRoute[]): Promise<void> {
-    if (!trip || !currentDate) return;
+  async function saveWithFiles(routes: PreparedRoute[], cover?: string): Promise<void> {
+    if (!trip || !currentDate || !settings) return;
     if (saving) return;
     saving = true;
     const body = bodyEl.value;
     const date = currentDate;
     setStatus("Saving…");
     try {
-      await commit(saveDayMessage(trip.title, date), [
+      const files = [
         ...routes.map((file) => ({ path: file.repoPath, bytes: file.bytes })),
         { path: dayPath(trip.slug, date), bytes: textBytes(body) },
-      ]);
+      ];
+      if (cover && !trip.cover) {
+        const raw = await readTextFile(settings, trip.indexPath);
+        if (raw != null) {
+          const parsed = parseFrontmatter(raw);
+          if (!parsed.data.cover) {
+            parsed.data.cover = cover;
+            files.push({ path: trip.indexPath, bytes: textBytes(stringifyFrontmatter(parsed.data, parsed.body)) });
+          }
+        }
+      }
+      await commit(saveDayMessage(trip.title, date), files);
       if (!trip.dayDates.includes(date)) trip.dayDates.push(date);
+      if (cover && !trip.cover) {
+        trip = { ...trip, cover };
+        if (settings.mediaWorkerUrl) {
+          await saveTripCover({
+            workerUrl: settings.mediaWorkerUrl,
+            token: settings.uploadToken || settings.token,
+            slug: trip.slug,
+            cover,
+          });
+        }
+      }
       dirty = false;
-      setStatus(routes.length ? "Saved the note and route to GitHub" : "Saved the note to GitHub");
+      const usedCover = Boolean(cover && trip.cover === cover);
+      await refreshCoverChoices();
+      const saved = routes.length ? "Saved the note and route to GitHub" : "Saved the note to GitHub";
+      setStatus(usedCover ? "Saved. That photo is the trip thumbnail." : saved);
     } catch (error) {
       dirty = true;
       setStatus(error instanceof Error ? error.message : "Save failed");
@@ -304,7 +401,7 @@ export function mountAuthor(root: HTMLElement): void {
       }
     }
 
-    const ready: { markdown: string; route?: PreparedRoute }[] = [];
+    const ready: { markdown: string; route?: PreparedRoute; cover?: string }[] = [];
     for (const item of prepared) {
       if (item.kind === "route" && item.repoPath) {
         ready.push({
@@ -329,6 +426,7 @@ export function mountAuthor(root: HTMLElement): void {
         const alt = item.filename.replace(/\.[^.]+$/, "");
         ready.push({
           markdown: item.kind === "video" ? videoMarkdownUrl(url) : imageMarkdownUrl(url, alt),
+          cover: item.kind === "photo" ? `/trip-media/${trip.slug}/photos/${item.filename}` : undefined,
         });
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Upload failed");
@@ -337,7 +435,8 @@ export function mountAuthor(root: HTMLElement): void {
     }
 
     for (const item of ready) insertAtCursor(bodyEl, item.markdown);
-    await saveWithFiles(ready.flatMap((item) => (item.route ? [item.route] : [])));
+    const cover = trip.cover ? "" : ready.find((item) => item.cover)?.cover || "";
+    await saveWithFiles(ready.flatMap((item) => (item.route ? [item.route] : [])), cover || undefined);
   }
 
   function renderList(trips: RemoteTrip[]): void {
@@ -505,6 +604,17 @@ export function mountAuthor(root: HTMLElement): void {
   bodyEl.addEventListener("input", () => {
     dirty = true;
     setStatus("Unsaved. Save sends this day to GitHub.");
+  });
+
+  saveCoverBtn.addEventListener("click", async () => {
+    if (!trip) return;
+    setStatus("Saving thumbnail…");
+    try {
+      const live = await persistCover(coverSelect.value);
+      setStatus(live || (coverSelect.value ? "Thumbnail saved." : "Thumbnail will be the first photo in the trip."));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not save the thumbnail.");
+    }
   });
 
   publishBtn.addEventListener("click", async () => {

@@ -6,6 +6,8 @@ import {
   dayRepoPath,
   gitCommitPlan,
   imageMarkdownUrl,
+  mediaObjectKey,
+  photoPathsInMarkdown,
   routeRepoPath,
 } from "../src/lib/github/commit-plan.ts";
 import { convertHeicFile } from "../src/lib/github/media.ts";
@@ -13,6 +15,7 @@ import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
 import { mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
 import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
 import { checkLogin, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
+import { isTripCoverPath, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
 import sharp from "sharp";
 
 const day = dayRepoPath("olympic-peninsula", "2026-09-08");
@@ -163,4 +166,73 @@ try {
   assert.match(String(error instanceof Error ? error.message : error), /Export a JPEG/);
 }
 assert.equal(failed, true);
+
+assert.equal(
+  mediaObjectKey("olympic-peninsula", "img-5123-2.jpg"),
+  "media/olympic-peninsula/photos/img-5123-2.jpg",
+);
+assert.deepEqual(
+  photoPathsInMarkdown(
+    "olympic-peninsula",
+    "![img-5123](/trip-media/olympic-peninsula/photos/img-5123-2.jpg)\n\n![later](https://gabriel-kane.com/travel-log/media/olympic-peninsula/photos/later.jpg)",
+  ),
+  [
+    "/trip-media/olympic-peninsula/photos/img-5123-2.jpg",
+    "/trip-media/olympic-peninsula/photos/later.jpg",
+  ],
+);
+assert.equal(isTripCoverPath("olympic-peninsula", "/trip-media/olympic-peninsula/photos/img-5123-2.jpg"), true);
+assert.equal(isTripCoverPath("olympic-peninsula", "/trip-media/other/photos/img-5123-2.jpg"), false);
+assert.equal(isTripCoverPath("olympic-peninsula", "https://evil.example/photo.jpg"), false);
+
+const indexRaw = "---\ntitle: Olympic Peninsula\ndate: 2026-09-05\ndraft: false\n---\n\nIntro\n";
+const withCover = setCoverFrontmatter(indexRaw, "/trip-media/olympic-peninsula/photos/picked.jpg");
+assert.match(withCover, /title: Olympic Peninsula/);
+assert.match(withCover, /cover: \/trip-media\/olympic-peninsula\/photos\/picked.jpg/);
+assert.match(withCover, /Intro/);
+assert.equal(setCoverFrontmatter(withCover, "").includes("cover:"), false);
+
+const files = new Map([
+  [
+    "trips/olympic-peninsula/index.md",
+    "---\ntitle: Olympic Peninsula\ndate: 2026-09-05\nendDate: 2026-09-12\nlocation: Washington\ndraft: false\n---\n",
+  ],
+  [
+    "trips/olympic-peninsula/days/2026-09-05.mdx",
+    "![img-5123](/trip-media/olympic-peninsula/photos/img-5123-2.jpg)\n",
+  ],
+  [
+    "trips/example-trip/index.md",
+    "---\ntitle: Example Trip\ndate: 2024-08-12\ndraft: false\n---\n",
+  ],
+]);
+const bucket = {
+  async list({ prefix }) {
+    return {
+      objects: [...files.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+      truncated: false,
+    };
+  },
+  async get(key) {
+    const text = files.get(key);
+    if (text == null) return null;
+    return { text: async () => text };
+  },
+};
+const home = await renderJournal(bucket, new URL("https://gabriel-kane.com/travel-log/"));
+const homeHtml = await home.text();
+assert.match(homeHtml, /<img class="thumb" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg" alt="" \/>/);
+assert.equal(homeHtml.includes("r2.dev"), false);
+assert.equal(homeHtml.includes("example-trip") && homeHtml.includes("<img"), true);
+const tripPage = await renderJournal(bucket, new URL("https://gabriel-kane.com/travel-log/trips/olympic-peninsula"));
+const tripHtml = await tripPage.text();
+assert.match(tripHtml, /<img class="cover" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
+
+files.set(
+  "trips/olympic-peninsula/index.md",
+  "---\ntitle: Olympic Peninsula\ndate: 2026-09-05\ncover: /trip-media/olympic-peninsula/photos/picked.jpg\ndraft: false\n---\n",
+);
+const picked = await renderJournal(bucket, new URL("https://gabriel-kane.com/travel-log/"));
+assert.match(await picked.text(), /src="\/travel-log\/media\/olympic-peninsula\/photos\/picked\.jpg"/);
+
 console.log("github author checks ok");

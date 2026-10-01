@@ -1,6 +1,6 @@
 import { marked } from "marked";
 import { applySiteBase } from "./github/commit-plan.ts";
-import { listDayDates, listTripSlugs, readDay, readTripMeta, type TripMeta } from "./author";
+import { firstTripPhoto, listDayDates, listTripSlugs, readDay, readTripMeta, type TripMeta } from "./author";
 
 marked.use({ gfm: true, breaks: true });
 
@@ -43,13 +43,19 @@ export function renderMarkdown(raw: string, base = "/"): string {
   return marked.parse(text, { async: false }) as string;
 }
 
+async function withCover(meta: TripMeta): Promise<TripMeta> {
+  if (meta.cover) return meta;
+  const cover = await firstTripPhoto(meta.slug);
+  return cover ? { ...meta, cover } : meta;
+}
+
 export async function listPublicTrips(): Promise<TripMeta[]> {
   const slugs = await listTripSlugs();
   const trips: TripMeta[] = [];
   for (const slug of slugs) {
     try {
       const meta = await readTripMeta(slug);
-      if (!meta.draft) trips.push(meta);
+      if (!meta.draft) trips.push(await withCover(meta));
     } catch {
       /* skip */
     }
@@ -70,6 +76,7 @@ export async function loadPublicTrip(slug: string, base = "/"): Promise<{
     return null;
   }
   if (meta.draft) return null;
+  meta = await withCover(meta);
   const indexRaw = await readIndexBody(slug);
   const dates = await listDayDates(slug);
   const days = [];

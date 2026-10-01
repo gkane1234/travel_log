@@ -65,7 +65,38 @@ export function videoMarkdownUrl(url: string): string {
 }
 
 export function mediaObjectKey(slug: string, filename: string): string {
-  return `media/${slug}/${filename}`;
+  return `media/${slug}/photos/${filename}`;
+}
+
+function isImageFilename(name: string): boolean {
+  return /\.(jpe?g|png|gif|webp)$/i.test(name);
+}
+
+/** Site path stored in trip frontmatter. The journal rewrites this to the login-gated media URL. */
+export function coverPathFromUrl(slug: string, url: string): string {
+  const value = url.trim().split(/[?#]/)[0];
+  const tripMedia = value.match(
+    /\/trip-media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/,
+  );
+  if (tripMedia && tripMedia[1] === slug && isImageFilename(tripMedia[2])) {
+    return `/trip-media/${slug}/photos/${tripMedia[2]}`;
+  }
+  const media = value.match(
+    /\/media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/(?:photos\/)?([a-z0-9][a-z0-9._-]{0,160})$/,
+  );
+  if (media && media[1] === slug && isImageFilename(media[2])) {
+    return `/trip-media/${slug}/photos/${media[2]}`;
+  }
+  return "";
+}
+
+export function photoPathsInMarkdown(slug: string, markdown: string): string[] {
+  const found: string[] = [];
+  for (const match of markdown.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+    const path = coverPathFromUrl(slug, match[1]);
+    if (path && !found.includes(path)) found.push(path);
+  }
+  return found;
 }
 
 function assertPublicUrl(url: string): void {

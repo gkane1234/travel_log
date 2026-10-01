@@ -28,6 +28,51 @@ function mediaUrl(src) {
   return src;
 }
 
+function isImageFile(name) {
+  return /\.(jpe?g|png|gif|webp)$/i.test(name);
+}
+
+/** Login-gated photo URL. Empty when the value is not a trip photo. */
+export function gatedPhotoUrl(src) {
+  const value = String(src || "").trim().split(/[?#]/)[0];
+  const tripMedia = value.match(/\/trip-media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/);
+  if (tripMedia && isImageFile(tripMedia[2])) {
+    return `${PREFIX}/media/${tripMedia[1]}/photos/${tripMedia[2]}`;
+  }
+  const direct = value.match(/\/travel-log\/(media\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:photos\/)?[a-z0-9][a-z0-9._-]{0,160})$/);
+  if (direct && isImageFile(direct[1])) return `${PREFIX}/${direct[1]}`;
+  return "";
+}
+
+export function isTripCoverPath(slug, cover) {
+  return gatedPhotoUrl(cover) === `${PREFIX}/media/${slug}/photos/${String(cover).split("/").pop()}`;
+}
+
+export function setCoverFrontmatter(raw, cover) {
+  const text = String(raw || "").replace(/^\uFEFF/, "");
+  const coverLine = cover ? `cover: ${cover}` : "";
+  if (!text.startsWith("---")) {
+    return coverLine ? `---\n${coverLine}\n---\n\n${text}` : text;
+  }
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return text;
+  const lines = text.slice(4, end).split(/\r?\n/).filter((line) => !/^cover\s*:/.test(line));
+  if (coverLine) lines.push(coverLine);
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const body = text.slice(end + 4);
+  const sep = body.startsWith("\n") || body === "" ? "" : "\n";
+  return `---\n${lines.join("\n")}\n---${sep}${body}`;
+}
+
+function firstPhotoInMarkdown(raw) {
+  const body = parseFrontmatter(raw).body;
+  for (const match of body.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+    const href = gatedPhotoUrl(match[1]);
+    if (href) return href;
+  }
+  return "";
+}
+
 function renderBody(raw) {
   let text = parseFrontmatter(raw).body;
   text = text.replace(/<TripVideo\s+src="([^"]+)"\s*\/?\s*>/g, (_, src) => {
@@ -67,8 +112,11 @@ function page(title, main) {
     h1, h2 { font-weight: 600; letter-spacing: -0.02em; }
     .meta { color: #5c675f; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
     img, video { max-width: 100%; height: auto; display: block; margin: 1rem 0; }
+    img.thumb { width: 7.5rem; height: 5.6rem; object-fit: cover; margin: 0; flex: none; }
+    img.cover { width: 100%; max-height: 22rem; object-fit: cover; margin: 0.4rem 0 1rem; }
     .trip-list { list-style: none; padding: 0; }
-    .trip-list a { display: block; padding: 0.8rem 0; border-top: 1px solid #cfc5b4; text-decoration: none; color: inherit; }
+    .trip-list a { display: flex; gap: 0.9rem; align-items: center; padding: 0.8rem 0; border-top: 1px solid #cfc5b4; text-decoration: none; color: inherit; }
+    .trip-list h2, .trip-list p { margin: 0.15rem 0; }
     .day { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #cfc5b4; }
   </style>
 </head>
@@ -99,6 +147,22 @@ async function readText(bucket, key) {
   const object = await bucket.get(key);
   if (!object) return null;
   return object.text();
+}
+
+async function tripThumbnail(bucket, slug, data) {
+  const fromCover = gatedPhotoUrl(data.cover || "");
+  if (fromCover) return fromCover;
+  const dayKeys = (await listKeys(bucket, `trips/${slug}/days/`)).filter((key) => /\.(md|mdx)$/.test(key)).sort();
+  for (const key of dayKeys) {
+    const raw = await readText(bucket, key);
+    if (!raw) continue;
+    const found = firstPhotoInMarkdown(raw);
+    if (found) return found;
+  }
+  const mediaKeys = (await listKeys(bucket, `media/${slug}/`))
+    .filter((key) => isImageFile(key))
+    .sort();
+  return mediaKeys[0] ? `${PREFIX}/${mediaKeys[0]}` : "";
 }
 
 function formatRange(start, end) {
@@ -134,6 +198,7 @@ export async function renderJournal(bucket, url) {
         date: data.date || "",
         endDate: data.endDate || "",
         summary: data.summary || "",
+        thumb: await tripThumbnail(bucket, slug, data),
       });
     }
     trips.sort((a, b) => String(b.date).localeCompare(String(a.date)));
@@ -142,7 +207,8 @@ export async function renderJournal(bucket, url) {
       .map((trip) => {
         const when = formatRange(trip.date, trip.endDate);
         const where = [trip.location, when].filter(Boolean).join(" · ");
-        return `<li><a href="${PREFIX}/trips/${encodeURIComponent(trip.slug)}/"><h2>${escapeHtml(trip.title)}</h2><p class="meta">${escapeHtml(where)}</p>${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}</a></li>`;
+        const thumb = trip.thumb ? `<img class="thumb" src="${escapeHtml(trip.thumb)}" alt="" />` : "";
+        return `<li><a href="${PREFIX}/trips/${encodeURIComponent(trip.slug)}/">${thumb}<span><h2>${escapeHtml(trip.title)}</h2><p class="meta">${escapeHtml(where)}</p>${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}</span></a></li>`;
       })
       .join("");
     return page("Travel Log", `<h1>Travel Log</h1><p class="meta">Trips we've taken together.</p><ul class="trip-list">${items}</ul>`);
@@ -155,13 +221,21 @@ export async function renderJournal(bucket, url) {
   const { data, body } = parseFrontmatter(indexRaw);
   const keys = await listKeys(bucket, `trips/${slug}/days/`);
   const days = [];
+  let notedPhoto = "";
   for (const key of keys.filter((item) => /\.(md|mdx)$/.test(item)).sort()) {
     const raw = await readText(bucket, key);
     if (!raw) continue;
+    if (!notedPhoto) notedPhoto = firstPhotoInMarkdown(raw);
     const date = key.split("/").pop().replace(/\.(md|mdx)$/, "");
     days.push(`<section class="day"><h2>${escapeHtml(date)}</h2>${renderBody(raw)}</section>`);
   }
   const when = formatRange(data.date, data.endDate);
   const where = [data.location, when].filter(Boolean).join(" · ");
-  return page(data.title || slug, `<p class="meta"><a href="${PREFIX}/">Trips</a></p><h1>${escapeHtml(data.title || slug)}</h1><p class="meta">${escapeHtml(where)}</p>${renderBody(body)}${days.join("")}`);
+  let thumb = gatedPhotoUrl(data.cover || "") || notedPhoto;
+  if (!thumb) {
+    const mediaKeys = (await listKeys(bucket, `media/${slug}/`)).filter((key) => isImageFile(key)).sort();
+    thumb = mediaKeys[0] ? `${PREFIX}/${mediaKeys[0]}` : "";
+  }
+  const cover = thumb ? `<img class="cover" src="${escapeHtml(thumb)}" alt="" />` : "";
+  return page(data.title || slug, `<p class="meta"><a href="${PREFIX}/">Trips</a></p><h1>${escapeHtml(data.title || slug)}</h1>${cover}<p class="meta">${escapeHtml(where)}</p>${renderBody(body)}${days.join("")}`);
 }

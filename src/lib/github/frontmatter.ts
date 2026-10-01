@@ -53,6 +53,7 @@ export type RemoteTrip = {
   endDate?: string;
   location?: string;
   summary?: string;
+  cover?: string;
   draft: boolean;
   indexPath: string;
   dayDates: string[];
@@ -67,6 +68,7 @@ export function tripFromIndex(slug: string, indexPath: string, raw: string, dayD
     endDate: data.endDate ? String(data.endDate) : undefined,
     location: data.location ? String(data.location) : undefined,
     summary: data.summary ? String(data.summary) : undefined,
+    cover: data.cover ? String(data.cover) : undefined,
     draft: data.draft !== false,
     indexPath,
     dayDates,

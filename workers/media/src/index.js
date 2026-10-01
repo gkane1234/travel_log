@@ -1,6 +1,6 @@
 import { AwsClient } from "aws4fetch";
 import { PUBLIC_PREFIX, isAllowedKey, isAllowedType, mediaPublicUrl, storageConfigError } from "./config.js";
-import { renderJournal } from "./journal.js";
+import { isTripCoverPath, renderJournal, setCoverFrontmatter } from "./journal.js";
 import { checkLogin, loginPage, mediaGate, safeNext } from "./gate.js";
 
 function json(body, status, extra = {}) {
@@ -241,6 +241,31 @@ export default {
         });
       }
       return json({ ok: true }, 200, { "Set-Cookie": result.cookie });
+    }
+
+    if (request.method === "POST" && path === `${PUBLIC_PREFIX}/cover`) {
+      const auth = await authorize(request, env);
+      if (!auth.ok) return cors(json({ error: auth.error }, 401));
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return cors(json({ error: "Expected a JSON body." }, 400));
+      }
+      const slug = String(body.slug || "");
+      const cover = String(body.cover || "");
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return cors(json({ error: "Invalid trip." }, 400));
+      if (cover && !isTripCoverPath(slug, cover)) {
+        return cors(json({ error: "Cover must be a photo already used in this trip." }, 400));
+      }
+      if (!env.TRIPS) return cors(json({ error: "Trip storage is not configured." }, 503));
+      const object = await env.TRIPS.get(`trips/${slug}/index.md`);
+      if (!object) return cors(json({ error: "Trip not found." }, 404));
+      const next = setCoverFrontmatter(await object.text(), cover);
+      await env.TRIPS.put(`trips/${slug}/index.md`, next, {
+        httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+      });
+      return cors(json({ ok: true, cover }, 200));
     }
 
     if (request.method !== "POST" || path !== `${PUBLIC_PREFIX}/sign`) {

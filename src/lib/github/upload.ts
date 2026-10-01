@@ -68,3 +68,27 @@ export async function uploadToBucket(options: {
   }
   return signed.publicUrl;
 }
+
+export async function saveTripCover(options: {
+  workerUrl: string;
+  token: string;
+  slug: string;
+  cover: string;
+}): Promise<void> {
+  const workerUrl = mediaWorkerOrigin(options.workerUrl);
+  if (!workerUrl) return;
+  if (!options.token) {
+    throw new Error("Sign in with a GitHub token, or set an upload token, before setting a thumbnail.");
+  }
+  const response = await fetch(`${workerUrl}/travel-log/cover`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${options.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ slug: options.slug, cover: options.cover }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { error?: string };
+  if (response.status === 404) return;
+  if (!response.ok) throw new Error(data.error || "Could not update the thumbnail on the site.");
+}

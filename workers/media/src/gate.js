@@ -55,13 +55,15 @@ export async function respondToMediaGet(request, env) {
   return null;
 }
 
+const USERNAMES = new Set(["jumbo", "gumbo"]);
+
 export async function checkLogin(body, env) {
   const password = String(env?.MEDIA_PASSWORD || "");
   if (!password) {
     return { ok: false, status: 503, error: "Media login is not configured (MEDIA_PASSWORD)." };
   }
-  const requiredUser = String(env?.MEDIA_USERNAME || "").trim();
-  if (requiredUser && String(body?.username || "") !== requiredUser) {
+  const username = String(body?.username || "").trim().toLowerCase();
+  if (!USERNAMES.has(username)) {
     return { ok: false, status: 401, error: "Wrong username or password." };
   }
   const givenHash = await sha256Hex(String(body?.password || ""));
@@ -84,7 +86,7 @@ export function loginPage() {
   <h1>Photo login</h1>
   <p>Trip notes stay readable without this. Photos and videos need this sign-in.</p>
   <form method="post" action="/travel-log/login">
-    <label>Username <input name="username" autocomplete="username" /></label>
+    <label>Username <input name="username" autocomplete="username" required /></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
     <button type="submit">Sign in</button>
   </form>

@@ -125,8 +125,14 @@ const denied = await respondToMediaGet(
   mediaEnv,
 );
 assert.equal(denied?.status, 401);
-const login = await checkLogin({ password: "not-a-real-secret" }, mediaEnv);
+const missingUser = await checkLogin({ password: "not-a-real-secret" }, mediaEnv);
+assert.equal(missingUser.ok, false);
+const wrongUser = await checkLogin({ username: "someone", password: "not-a-real-secret" }, mediaEnv);
+assert.equal(wrongUser.ok, false);
+const login = await checkLogin({ username: "Jumbo", password: "not-a-real-secret" }, mediaEnv);
 assert.equal(login.ok, true);
+const gumbo = await checkLogin({ username: "gumbo", password: "not-a-real-secret" }, mediaEnv);
+assert.equal(gumbo.ok, true);
 assert.match(login.cookie, /HttpOnly/);
 assert.match(login.cookie, /Secure/);
 assert.match(login.cookie, /Path=\/travel-log/);

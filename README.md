@@ -58,7 +58,7 @@ Cloudflare Workers Builds, with the Git repo connected, uses these fields:
 
 `npm ci` in that directory needs the committed `workers/media/package-lock.json`. Leave the build command as `npm run build` after this repo is pushed. Clearing it is unnecessary.
 
-Set these in the Worker’s dashboard secrets or variables. Do not put the values in the repo: `MEDIA_PASSWORD`, `MEDIA_BASE_URL`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, and `GITHUB_REPOSITORY`. `MEDIA_USERNAME` and `UPLOAD_TOKEN` are optional.
+Set these in the Worker’s dashboard secrets or variables. Do not put the values in the repo: `MEDIA_PASSWORD`, `MEDIA_BASE_URL`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, and `GITHUB_REPOSITORY`. `UPLOAD_TOKEN` is optional. Photo login accepts only the usernames `jumbo` and `gumbo`, both with `MEDIA_PASSWORD`.
 
 From `workers/media`, the same deploy by hand:
 
@@ -72,7 +72,6 @@ npx wrangler secret put S3_SECRET_ACCESS_KEY
 npx wrangler secret put S3_REGION
 npx wrangler secret put MEDIA_BASE_URL
 npx wrangler secret put MEDIA_PASSWORD
-npx wrangler secret put MEDIA_USERNAME
 npx wrangler secret put GITHUB_REPOSITORY
 npx wrangler secret put UPLOAD_TOKEN
 npx wrangler deploy
@@ -84,12 +83,11 @@ Enter these values when prompted:
 - `S3_BUCKET`: `travel-log-media`
 - `S3_REGION`: `auto`
 - `MEDIA_BASE_URL`: `https://gabriel-kane.com`, with no path and no trailing slash
-- `MEDIA_PASSWORD`: the photo password. It is not stored in the repo.
-- `MEDIA_USERNAME`: optional shared name. Leave it unset if the password alone is enough.
+- `MEDIA_PASSWORD`: the photo password. It is not stored in the repo. Both `jumbo` and `gumbo` use this password.
 - `GITHUB_REPOSITORY`: `gkane1234/travel_log`
 - `UPLOAD_TOKEN`: optional. If you set it, put the same value in the author page’s Upload token field. If you leave it empty, the editor sends the GitHub token and the Worker checks that token can read this repo.
 
-Uploads still use that GitHub token or `UPLOAD_TOKEN`. Viewing uses `MEDIA_PASSWORD` only. Open https://gabriel-kane.com/travel-log/login and submit the password. `GET /travel-log` redirects there. The Worker sets an httpOnly Secure cookie for `/travel-log`. It does not check a password that ships in the page. Do not route the whole site to this Worker. Trip notes stay on the public site. Old `/login`, `/media`, and `/travel_log` requests are not served as files.
+Uploads still use that GitHub token or `UPLOAD_TOKEN`. Viewing uses username `jumbo` or `gumbo` plus `MEDIA_PASSWORD`. Open https://gabriel-kane.com/travel-log/login and sign in. `GET /travel-log` redirects there. The Worker sets an httpOnly Secure cookie for `/travel-log`. It does not check a password that ships in the page. Do not route the whole site to this Worker. Trip notes stay on the public site. Old `/login`, `/media`, and `/travel_log` requests are not served as files.
 
 `npx wrangler deploy` prints a workers.dev URL. Prefer https://gabriel-kane.com, and paste that origin into **Media upload URL** on the author page (no path, no trailing slash). The editor calls `/travel-log/sign`. The note will point at `https://gabriel-kane.com/travel-log/media/...`, which the Worker serves.
 

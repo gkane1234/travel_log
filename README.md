@@ -45,10 +45,20 @@ Create these, then deploy the Worker in `workers/media`:
 3. Add a CORS policy on the bucket so the browser can `PUT` an upload. Allow your Cloudflare site origin and `http://localhost:4321`, method `PUT`, and header `content-type`. Do not allow public `GET`.
 4. Put the Worker on the same hostname as the site, with routes for `/media/*` and `/login`. Set `MEDIA_BASE_URL` to that origin, for example `https://trips.example.com`.
 
-From `workers/media`:
+Cloudflare Workers Builds, with the Git repo connected, uses these fields:
+
+- Root directory: `workers/media`
+- Build command: `npm run build` (checks the Worker source only; it is not the Astro site build)
+- Deploy command: `npx wrangler deploy`
+
+`npm ci` in that directory needs the committed `workers/media/package-lock.json`. Leave the build command as `npm run build` after this repo is pushed. Clearing it is unnecessary.
+
+Set these in the Worker’s dashboard secrets or variables. Do not put the values in the repo: `MEDIA_PASSWORD`, `MEDIA_BASE_URL`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, and `GITHUB_REPOSITORY`. `MEDIA_USERNAME` and `UPLOAD_TOKEN` are optional.
+
+From `workers/media`, the same deploy by hand:
 
 ```bash
-npm install
+npm ci
 npx wrangler login
 npx wrangler secret put S3_ENDPOINT
 npx wrangler secret put S3_BUCKET

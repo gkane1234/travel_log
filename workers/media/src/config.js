@@ -35,7 +35,7 @@ export function mediaPublicUrl(base, key) {
   return `${siteOrigin(base)}${PUBLIC_PREFIX}/${key}`;
 }
 
-const KEY = /^media\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9][a-z0-9._-]{0,120}$/;
+const KEY = /^media\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:(?:photos|routes)\/)?[a-z0-9][a-z0-9._-]{0,160}$/;
 
 export function isAllowedKey(key) {
   return typeof key === "string" && KEY.test(key) && !key.includes("..");

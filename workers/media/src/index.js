@@ -1,5 +1,6 @@
 import { AwsClient } from "aws4fetch";
 import { PUBLIC_PREFIX, isAllowedKey, isAllowedType, mediaPublicUrl, storageConfigError } from "./config.js";
+import { renderJournal } from "./journal.js";
 import { checkLogin, loginPage, mediaGate, safeNext } from "./gate.js";
 
 function json(body, status, extra = {}) {
@@ -192,14 +193,31 @@ export default {
         return loginRedirect(url);
       }
       if (url.pathname.startsWith(`${PUBLIC_PREFIX}/media/`)) {
-        const configError = storageConfigError(env);
-        if (configError) return json({ error: configError }, 503);
         const key = decodeURIComponent(url.pathname.slice(`${PUBLIC_PREFIX}/`.length));
         if (!isAllowedKey(key)) return json({ error: "Not found" }, 404);
+        if (env.TRIPS) {
+          const object = await env.TRIPS.get(key);
+          if (!object) return json({ error: "Not found" }, 404);
+          const headers = new Headers();
+          headers.set("Content-Type", object.httpMetadata?.contentType || "application/octet-stream");
+          headers.set("Cache-Control", "private, no-store");
+          headers.set("X-Content-Type-Options", "nosniff");
+          return new Response(object.body, { status: 200, headers });
+        }
+        const configError = storageConfigError(env);
+        if (configError) return json({ error: configError }, 503);
         try {
           return await readPrivateObject(env, key);
         } catch {
           return json({ error: "Could not read that file." }, 502);
+        }
+      }
+      if (env.TRIPS) {
+        try {
+          const journal = await renderJournal(env.TRIPS, url);
+          if (journal) return journal;
+        } catch {
+          /* Fall back to the published site if the bucket read fails. */
         }
       }
       return proxyTravelLog(request, env, url);

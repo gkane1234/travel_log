@@ -1,85 +1,42 @@
 ---
-import { getCollection, render } from "astro:content";
 import BaseLayout from "@layouts/BaseLayout.astro";
-import TripMap from "@components/TripMap.astro";
-import TripVideo from "@components/TripVideo.astro";
-import {
-  dateFromDayId,
-  formatTripDates,
-  isPublished,
-  tripSlugFromDayId,
-  tripSlugFromId,
-} from "@lib/trips";
+import { loadPublicTrip } from "@lib/render-markdown";
+import { formatTripDates, parseDateString } from "@lib/trips";
 
-export async function getStaticPaths() {
-  const trips = await getCollection("trips");
+export const prerender = false;
 
-  return trips
-    .filter((t) => isPublished(t, import.meta.env.DEV))
-    .map((trip) => ({
-      params: { slug: tripSlugFromId(trip.id) },
-      props: { trip },
-    }));
-}
+const slug = Astro.params.slug;
+if (!slug) return Astro.redirect("/");
 
-const { trip } = Astro.props;
-const slug = tripSlugFromId(trip.id);
+const page = await loadPublicTrip(slug);
+if (!page) return new Response("Not found", { status: 404 });
 
-// Load days at render time (not in getStaticPaths) so Author-added days
-// show up in `astro dev` without a restart.
-const tripDays = (await getCollection("days"))
-  .filter((d) => tripSlugFromDayId(d.id) === slug)
-  .sort((a, b) => dateFromDayId(a.id).localeCompare(dateFromDayId(b.id)));
-
-const { Content: Intro } = await render(trip);
-
-const renderedDays = await Promise.all(
-  tripDays.map(async (day) => {
-    const { Content } = await render(day);
-    const date = dateFromDayId(day.id);
-    return {
-      date,
-      title: day.data.title,
-      Content,
-    };
-  }),
-);
-
-const components = { TripMap, TripVideo };
+const { meta, introHtml, days } = page;
 ---
 
-<BaseLayout title={trip.data.title} description={trip.data.summary}>
+<BaseLayout title={meta.title} description={meta.summary}>
   <article class="prose">
-    <p class="meta">
-      <a href="/">← Trips</a>
-      {
-        import.meta.env.DEV && (
-          <>
-            {" · "}
-            <a href={`/author/${slug}`}>Edit in Author</a>
-          </>
-        )
-      }
-    </p>
-    <h1>{trip.data.title}</h1>
+    <p class="meta"><a href="/">← Trips</a></p>
+    <h1>{meta.title}</h1>
     <p class="meta">
       {
         [
-          trip.data.location,
-          formatTripDates(trip.data.date, trip.data.endDate),
-          trip.data.draft ? "draft" : null,
+          meta.location,
+          formatTripDates(
+            parseDateString(meta.date),
+            meta.endDate ? parseDateString(meta.endDate) : undefined,
+          ),
         ]
           .filter(Boolean)
           .join(" · ")
       }
     </p>
-    <Intro components={components} />
-
+    <div set:html={introHtml} />
     {
-      renderedDays.map(({ date, title, Content }) => (
+      days.map((day) => (
         <section class="day-block">
-          <h2>{title ?? date}</h2>
-          <Content components={components} />
+          <h2>{day.date}</h2>
+          <div set:html={day.html} />
         </section>
       ))
     }

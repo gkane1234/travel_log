@@ -1,16 +1,12 @@
 ---
-import { getCollection } from "astro:content";
 import BaseLayout from "@layouts/BaseLayout.astro";
 import { site } from "@lib/site";
-import {
-  formatTripDates,
-  isPublished,
-  tripSlugFromId,
-} from "@lib/trips";
+import { listPublicTrips } from "@lib/render-markdown";
+import { formatTripDates, parseDateString } from "@lib/trips";
 
-const trips = (await getCollection("trips"))
-  .filter((t) => isPublished(t, import.meta.env.DEV))
-  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+export const prerender = false;
+
+const trips = await listPublicTrips();
 ---
 
 <BaseLayout>
@@ -21,43 +17,33 @@ const trips = (await getCollection("trips"))
 
   {
     trips.length === 0 ? (
-      <p class="meta" style="margin-top: 2rem;">
-        No trips yet.
-        {import.meta.env.DEV && (
-          <>
-            {" "}
-            <a href="/author">Create one in Author</a>.
-          </>
-        )}
-      </p>
+      <p class="meta" style="margin-top: 2rem;">No trips yet.</p>
     ) : (
       <ul class="trip-list">
-        {trips.map((trip) => {
-          const slug = tripSlugFromId(trip.id);
-          const cover = trip.data.cover;
-          return (
-            <li>
-              <a class="trip-card" href={`/trips/${slug}/`}>
-                <div class="trip-card__cover">
-                  {cover ? <img src={cover} alt="" loading="lazy" /> : null}
-                </div>
-                <div>
-                  <h2>{trip.data.title}</h2>
-                  <p class="meta">
-                    {[
-                      trip.data.location,
-                      formatTripDates(trip.data.date, trip.data.endDate),
-                      trip.data.draft ? "draft" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                  {trip.data.summary ? <p>{trip.data.summary}</p> : null}
-                </div>
-              </a>
-            </li>
-          );
-        })}
+        {trips.map((trip) => (
+          <li>
+            <a class="trip-card" href={`/trips/${trip.slug}/`}>
+              <div class="trip-card__cover">
+                {trip.cover ? <img src={trip.cover} alt="" loading="lazy" /> : null}
+              </div>
+              <div>
+                <h2>{trip.title}</h2>
+                <p class="meta">
+                  {[
+                    trip.location,
+                    formatTripDates(
+                      parseDateString(trip.date),
+                      trip.endDate ? parseDateString(trip.endDate) : undefined,
+                    ),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                {trip.summary ? <p>{trip.summary}</p> : null}
+              </div>
+            </a>
+          </li>
+        ))}
       </ul>
     )
   }

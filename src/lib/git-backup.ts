@@ -1,8 +1,20 @@
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+function projectRoot(): string {
+  const cwd = process.cwd();
+  if (
+    fs.existsSync(path.join(cwd, "trips")) &&
+    fs.existsSync(path.join(cwd, "astro.config.mjs"))
+  ) {
+    return cwd;
+  }
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+}
+
+const root = projectRoot();
 
 export type BackupResult = {
   committed: boolean;

@@ -1,4 +1,5 @@
 ﻿import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +9,18 @@ import sharp from "sharp";
 import JSZip from "jszip";
 import ffmpegPath from "ffmpeg-static";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+function projectRoot(): string {
+  const cwd = process.cwd();
+  if (
+    fsSync.existsSync(path.join(cwd, "trips")) &&
+    fsSync.existsSync(path.join(cwd, "astro.config.mjs"))
+  ) {
+    return cwd;
+  }
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+}
+
+const root = projectRoot();
 
 export function tripsRoot(): string {
   return path.join(root, "trips");
@@ -48,6 +60,7 @@ export type TripMeta = {
   endDate?: string;
   location?: string;
   summary?: string;
+  cover?: string;
   draft: boolean;
 };
 
@@ -114,6 +127,7 @@ export async function readTripMeta(slug: string): Promise<TripMeta> {
     endDate: data.endDate ? String(data.endDate) : undefined,
     location: data.location ? String(data.location) : undefined,
     summary: data.summary ? String(data.summary) : undefined,
+    cover: data.cover ? String(data.cover) : undefined,
     draft: data.draft !== false,
   };
 }

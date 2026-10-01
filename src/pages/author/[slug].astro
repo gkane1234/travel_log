@@ -1,16 +1,7 @@
 ---
 import BaseLayout from "@layouts/BaseLayout.astro";
-import { listTripSlugs } from "../../lib/author";
 
-export async function getStaticPaths() {
-  if (!import.meta.env.DEV) return [];
-  const slugs = await listTripSlugs();
-  return slugs.map((slug) => ({ params: { slug } }));
-}
-
-if (!import.meta.env.DEV) {
-  return Astro.redirect("/");
-}
+export const prerender = false;
 
 const { slug } = Astro.params;
 ---
@@ -175,31 +166,56 @@ const { slug } = Astro.params;
     dirty = true;
   }
 
+  let saveTimer = 0;
+  let inFlight = false;
+  let saveAgain = false;
+
+  function scheduleSave() {
+    dirty = true;
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
+      saveDay();
+    }, 700);
+  }
+
   async function saveDay() {
+    window.clearTimeout(saveTimer);
     if (!currentDate) return;
-    setStatus("Saving…");
-    const res = await fetch(`/api/author/trips/${slug}/days/${currentDate}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: bodyEl.value }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setStatus(data.error || "Save failed");
+    if (inFlight) {
+      saveAgain = true;
       return;
     }
-    dirty = false;
-    setStatus(
-      data.warning ? `Saved ${currentDate}. ${data.warning}` : `Saved ${currentDate}`,
-    );
+    inFlight = true;
+    const body = bodyEl.value;
+    const date = currentDate;
+    setStatus("Saving…");
+    try {
+      const res = await fetch(`/api/author/trips/${slug}/days/${date}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Save failed");
+        return data;
+      }
+      if (bodyEl.value === body && currentDate === date) dirty = false;
+      setStatus(data.warning ? `Saved. ${data.warning}` : "Saved");
+      return data;
+    } catch {
+      setStatus("Save failed");
+    } finally {
+      inFlight = false;
+      if (saveAgain) {
+        saveAgain = false;
+        await saveDay();
+      }
+    }
   }
 
   async function loadDay(date, { pushUrl = true } = {}) {
-    if (dirty) {
-      const ok = confirm("Save current day before switching?");
-      if (ok) await saveDay();
-      else dirty = false;
-    }
+    if (dirty) await saveDay();
     setStatus("Loading…");
     const res = await fetch(
       `/api/author/trips/${slug}/days/${date}?ensure=1`,
@@ -261,7 +277,7 @@ const { slug } = Astro.params;
   });
   saveBtn.addEventListener("click", () => saveDay());
   bodyEl.addEventListener("input", () => {
-    dirty = true;
+    scheduleSave();
   });
 
   async function uploadMedia(file) {
@@ -278,8 +294,10 @@ const { slug } = Astro.params;
       return;
     }
     insertAtCursor(data.markdown);
-    await saveDay();
-    setStatus(`Inserted ${data.filename}`);
+    const saved = await saveDay();
+    if (saved?.warning) setStatus(`Inserted ${data.filename}. ${saved.warning}`);
+    else if (data.warning) setStatus(data.warning);
+    else setStatus(`Inserted ${data.filename}`);
   }
 
   async function uploadGpx(file) {
@@ -296,8 +314,10 @@ const { slug } = Astro.params;
       return;
     }
     insertAtCursor(data.markdown);
-    await saveDay();
-    setStatus(`Inserted route ${data.filename}`);
+    const saved = await saveDay();
+    if (saved?.warning) setStatus(`Inserted route ${data.filename}. ${saved.warning}`);
+    else if (data.warning) setStatus(data.warning);
+    else setStatus(`Inserted route ${data.filename}`);
   }
 
   async function handleFiles(files) {

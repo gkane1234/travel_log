@@ -181,6 +181,56 @@ img {
   margin: 0 0 0.75rem;
 }
 
+.trip-map {
+  margin: 1.75rem 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.trip-map__canvas {
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(135deg, rgba(46, 74, 62, 0.12), transparent 55%),
+    repeating-linear-gradient(
+      -12deg,
+      transparent,
+      transparent 11px,
+      rgba(46, 74, 62, 0.06) 11px,
+      rgba(46, 74, 62, 0.06) 12px
+    );
+}
+.trip-map__mark {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.trip-map figcaption {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid var(--line);
+}
+.trip-map figcaption span,
+.trip-map figcaption em {
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-style: normal;
+}
+.trip-map figcaption em {
+  font-style: italic;
+}
+.trip-video {
+  margin: 1.75rem 0;
+}
+.trip-video video {
+  display: block;
+  width: 100%;
+  background: #111;
+}
+
 @media (max-width: 640px) {
   .trip-card {
     grid-template-columns: 1fr;

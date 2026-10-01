@@ -30,18 +30,8 @@ function safeResolve(tripsRoot: string, urlPath: string): string | null {
   return file;
 }
 
-function copyDir(src: string, dest: string) {
-  if (!fs.existsSync(src)) return;
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const from = path.join(src, entry.name);
-    const to = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDir(from, to);
-    else if (!entry.name.startsWith(".tmp-")) fs.copyFileSync(from, to);
-  }
-}
-
-/** Serve and ship trip photos/routes at /trip-media/<slug>/{photos,routes}/... */
+/** Serve trip photos and routes at /trip-media/<slug>/{photos,routes}/... in dev.
+ * Production uses the trip-media route, which reads trips/ on each request. */
 export function tripMediaPlugin(projectRoot: string): Plugin {
   const tripsRoot = path.join(projectRoot, "trips");
 
@@ -62,21 +52,6 @@ export function tripMediaPlugin(projectRoot: string): Plugin {
         res.setHeader("Cache-Control", "no-cache");
         fs.createReadStream(file).pipe(res);
       });
-    },
-    closeBundle() {
-      if (!fs.existsSync(tripsRoot)) return;
-      const outRoot = path.join(projectRoot, "dist", "trip-media");
-      for (const slug of fs.readdirSync(tripsRoot, { withFileTypes: true })) {
-        if (!slug.isDirectory()) continue;
-        copyDir(
-          path.join(tripsRoot, slug.name, "photos"),
-          path.join(outRoot, slug.name, "photos"),
-        );
-        copyDir(
-          path.join(tripsRoot, slug.name, "routes"),
-          path.join(outRoot, slug.name, "routes"),
-        );
-      }
     },
   };
 }

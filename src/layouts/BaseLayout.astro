@@ -9,7 +9,6 @@ interface Props {
 
 const { title, description = site.description } = Astro.props;
 const fullTitle = title ? `${title} · ${site.name}` : site.name;
-const isDev = import.meta.env.DEV;
 ---
 
 <!doctype html>
@@ -31,7 +30,7 @@ const isDev = import.meta.env.DEV;
       <a class="site-brand" href="/">{site.name}</a>
       <nav class="site-nav">
         <a href="/">Trips</a>
-        {isDev && <a href="/author">Author</a>}
+        <a href="/author">Author</a>
       </nav>
     </header>
     <main class="site-main">

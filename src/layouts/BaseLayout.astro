@@ -39,6 +39,9 @@ const base = import.meta.env.BASE_URL;
       <nav class="site-nav">
         <a href={base}>Trips</a>
         <a href={`${base}author/`}>Author</a>
+        <form method="post" action={`${base}logout`}>
+          <button type="submit">Log out</button>
+        </form>
       </nav>
     </header>
     <main class="site-main">

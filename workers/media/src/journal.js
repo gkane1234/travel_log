@@ -142,6 +142,9 @@ function page(title, main, motion) {
     #log-panel { position: absolute; top: calc(100% + 0.45rem); left: 0; width: min(36rem, calc(100vw - 2.5rem)); max-height: min(70vh, 34rem); overflow: auto; padding: 0.4rem 1rem 1rem; background: rgba(243, 239, 230, 0.94); border-radius: 10px; box-shadow: 0 10px 28px rgba(28, 36, 30, 0.16); }
     #log-panel[hidden] { display: none !important; }
     header { display: flex; justify-content: space-between; align-items: baseline; }
+    .header-actions { display: flex; align-items: center; gap: 0.85rem; }
+    .header-actions form { margin: 0; }
+    .header-actions button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
     h1, h2 { font-weight: 600; letter-spacing: -0.02em; }
     .meta { color: #5c675f; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
     img, video { max-width: 100%; height: auto; display: block; margin: 1rem 0; }
@@ -160,22 +163,7 @@ function page(title, main, motion) {
     .gallery-item img, .gallery-item video { width: 100%; height: 100%; object-fit: cover; margin: 0; pointer-events: none; }
     button.note-media { display: block; width: 100%; margin: 1rem 0; padding: 0; border: 0; background: transparent; text-align: left; }
     button.note-media img, button.note-media video { margin: 0; width: 100%; pointer-events: none; }
-    .add-media, a.edit-trip { font-family: "Segoe UI", sans-serif; font-size: 0.9rem; text-decoration: none; border: 1px solid #2e4a3e; color: #2e4a3e; background: transparent; padding: 0.3rem 0.65rem; cursor: pointer; }
-    .add-media { position: relative; background: #2e4a3e; color: #fff; }
-    .add-media input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .file-drop { border: 1px dashed #8a8175; padding: 0.8rem; margin: 0.4rem 0 0.6rem; display: grid; gap: 0.55rem; justify-items: start; }
-    .file-drop.dragover { outline: 2px solid #2e4a3e; }
-    .upload-progress { list-style: none; padding: 0; margin: 0.4rem 0 0.7rem; display: grid; gap: 0.45rem; }
-    .upload-file { display: grid; grid-template-columns: 6rem 1fr; gap: 0.55rem; align-items: center; }
-    .upload-preview { width: 6rem; height: 4.5rem; overflow: hidden; background: #e4ddd0; }
-    .upload-preview img, .upload-preview video { width: 6rem; height: 4.5rem; max-width: 6rem; max-height: 4.5rem; object-fit: cover; margin: 0; display: block; }
-    .upload-body { display: grid; gap: 0.15rem; min-width: 0; }
-    .upload-name { font-family: "Segoe UI", sans-serif; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .upload-note { font-family: "Segoe UI", sans-serif; font-size: 0.75rem; }
-    .upload-file[data-phase="failed"] .upload-note { color: #8a2f2f; }
-    .upload-count { margin: 0.15rem 0 0.6rem; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; }
-    progress { width: 100%; }
-    .file-drop p { margin: 0; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; }
+    a.edit-trip { font-family: "Segoe UI", sans-serif; font-size: 0.9rem; text-decoration: none; border: 1px solid #2e4a3e; color: #2e4a3e; background: transparent; padding: 0.3rem 0.65rem; cursor: pointer; }
     #lightbox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(28, 36, 30, 0.9); }
     #lightbox[hidden] { display: none; }
     #lightbox img, #lightbox video { max-width: min(92vw, 64rem); max-height: 86vh; margin: 0; }
@@ -186,7 +174,10 @@ function page(title, main, motion) {
   ${motionHtml ? motionHtml.chrome : ""}
   <header>
     <a href="${PREFIX}/">Travel Log</a>
-    <a href="${PREFIX}/author/">Author</a>
+    <nav class="header-actions">
+      <a href="${PREFIX}/author/">Author</a>
+      <form method="post" action="${PREFIX}/logout"><button type="submit">Log out</button></form>
+    </nav>
   </header>
   <main>${main}</main>
   ${motionHtml ? motionHtml.script : ""}
@@ -383,15 +374,13 @@ function galleryMarkup(items) {
     })
     .join("");
   const grid = tiles ? `<div class="gallery-grid">${tiles}</div>` : "";
-  return `<section class="gallery" aria-label="Photos and videos"><div class="gallery-bar"><h2>Photos and videos</h2></div><div id="gallery-drop" class="file-drop"><p>Drop photos and videos here</p><label class="add-media">Choose photos and videos<input id="gallery-add" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" /></label></div><ol id="gallery-progress" class="upload-progress" hidden></ol><p id="gallery-status" class="meta"></p>${grid}</section>`;
+  return `<section class="gallery" aria-label="Photos and videos"><div class="gallery-bar"><h2>Photos and videos</h2></div>${grid}</section>`;
 }
 
-function tripViewer(slug) {
-  const slugLiteral = JSON.stringify(slug);
+function tripViewer() {
   return `<div id="lightbox" hidden><button type="button" id="lightbox-close">Close</button><div id="lightbox-frame"></div></div>
 <script>
 (() => {
-  const slug = ${slugLiteral};
   const box = document.getElementById("lightbox");
   const frame = document.getElementById("lightbox-frame");
   const close = document.getElementById("lightbox-close");
@@ -422,371 +411,6 @@ function tripViewer(slug) {
     if (!button || !button.dataset.src) return;
     openViewer(button.dataset.kind, button.dataset.src);
   });
-  const input = document.getElementById("gallery-add");
-  const drop = document.getElementById("gallery-drop");
-  const status = document.getElementById("gallery-status");
-  let busy = false;
-  let acceptMore = null;
-  function say(message) { if (status) status.textContent = message; }
-  function names() {
-    const found = new Set();
-    document.querySelectorAll(".gallery-item, .note-media").forEach((node) => {
-      const name = (node.dataset.src || "").split("/").pop();
-      if (name) found.add(decodeURIComponent(name));
-    });
-    return found;
-  }
-  function tile(item) {
-    let grid = document.querySelector(".gallery-grid");
-    if (!grid) {
-      grid = document.createElement("div");
-      grid.className = "gallery-grid";
-      const section = document.querySelector(".gallery");
-      if (!section) return;
-      section.append(grid);
-    }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "gallery-item";
-    button.dataset.kind = item.kind;
-    button.dataset.src = item.url;
-    if (item.kind === "video") {
-      const video = document.createElement("video");
-      video.muted = true;
-      video.playsInline = true;
-      video.preload = "metadata";
-      video.src = item.url;
-      button.append(video);
-    } else {
-      const img = document.createElement("img");
-      img.alt = "";
-      img.src = item.url;
-      button.append(img);
-    }
-    grid.append(button);
-  }
-  async function uploader() {
-    if (window.travelLogUploadGallery) return window.travelLogUploadGallery;
-    const response = await fetch("/travel-log/gallery-client/", { credentials: "same-origin" });
-    if (!response.ok) throw new Error("Could not load the photo uploader.");
-    const html = await response.text();
-    const named = html.match(/src="([^"]*gallery-client[^"]*\\.js)"/);
-    const any = html.match(/<script type="module" src="([^"]+)"/);
-    const src = (named || any || [])[1];
-    if (!src) throw new Error("Could not load the photo uploader.");
-    await import(new URL(src, location.origin).href);
-    if (!window.travelLogUploadGallery) throw new Error("Could not load the photo uploader.");
-    return window.travelLogUploadGallery;
-  }
-  function showUpload(files) {
-    const list = document.getElementById("gallery-progress");
-    if (!list) return { update() {}, addFiles() { return 0; } };
-    const previous = list.nextElementSibling;
-    if (previous && previous.classList.contains("upload-count")) previous.remove();
-    list.querySelectorAll("img, video").forEach((node) => {
-      const src = node.getAttribute("src") || "";
-      if (src.indexOf("blob:") === 0) URL.revokeObjectURL(src);
-    });
-    list.replaceChildren();
-    const count = document.createElement("p");
-    count.className = "upload-count meta";
-    list.insertAdjacentElement("afterend", count);
-    const batch = files.slice();
-    const rows = [];
-    const settled = new Set();
-    let finished = 0;
-    let failures = 0;
-    function lowerName(file) {
-      return String(file && file.name || "").toLowerCase();
-    }
-    function heicFile(file) {
-      const type = file && file.type || "";
-      const name = lowerName(file);
-      return name.endsWith(".heic") || name.endsWith(".heif") || type === "image/heic" || type === "image/heif";
-    }
-    function videoFile(file) {
-      const type = file && file.type || "";
-      const name = lowerName(file);
-      return type.indexOf("video/") === 0 || name.endsWith(".mp4") || name.endsWith(".m4v") || name.endsWith(".webm") || name.endsWith(".mov");
-    }
-    function revokeRow(row) {
-      row.querySelectorAll("img, video").forEach((node) => {
-        const src = node.getAttribute("src") || "";
-        if (src.indexOf("blob:") === 0) URL.revokeObjectURL(src);
-      });
-    }
-    function paintCount() {
-      const active = rows.some((row) => row && row.dataset.phase !== "failed");
-      const failed = rows.some((row) => row && row.dataset.phase === "failed");
-      if (settled.size === batch.length) {
-        count.hidden = true;
-        count.textContent = "";
-        if (!failures) {
-          rows.forEach((row) => { if (row) revokeRow(row); });
-          list.replaceChildren();
-          list.hidden = true;
-        } else {
-          list.hidden = !failed;
-        }
-        return;
-      }
-      count.hidden = false;
-      count.textContent = finished + "/" + batch.length;
-      list.hidden = !active && !failed;
-    }
-    function ensureRow(index) {
-      if (rows[index]) return rows[index];
-      const file = batch[index];
-      if (!file) return null;
-      const row = document.createElement("li");
-      row.className = "upload-file";
-      const preview = document.createElement("span");
-      preview.className = "upload-preview";
-      if (videoFile(file)) {
-        const url = URL.createObjectURL(file);
-        if (String(url).indexOf("blob:") === 0) {
-          const node = document.createElement("video");
-          node.src = url;
-          node.muted = true;
-          node.playsInline = true;
-          node.preload = "metadata";
-          node.width = 96;
-          node.height = 72;
-          node.addEventListener("loadeddata", () => {
-            try { if (node.currentTime < 0.01) node.currentTime = 0.1; } catch (error) { /* keep the tile */ }
-          });
-          preview.append(node);
-        }
-      } else if (!heicFile(file)) {
-        const url = URL.createObjectURL(file);
-        if (String(url).indexOf("blob:") === 0) {
-          const node = document.createElement("img");
-          node.src = url;
-          node.alt = "";
-          node.width = 96;
-          node.height = 72;
-          preview.append(node);
-        }
-      }
-      const body = document.createElement("span");
-      body.className = "upload-body";
-      const name = document.createElement("span");
-      name.className = "upload-name";
-      name.textContent = file.name;
-      const bar = document.createElement("progress");
-      bar.max = 1;
-      bar.value = 0;
-      const note = document.createElement("span");
-      note.className = "upload-note";
-      body.append(name, bar, note);
-      row.append(preview, body);
-      rows[index] = row;
-      list.append(row);
-      list.hidden = false;
-      return row;
-    }
-    function setPreview(index, source) {
-      if (settled.has(index)) return;
-      const row = ensureRow(index);
-      const preview = row && row.querySelector(".upload-preview");
-      if (!row || !preview) return;
-      const previous = preview.querySelector("img");
-      if (previous) {
-        const owned = previous.getAttribute("src") || "";
-        if (owned.indexOf("blob:") === 0) URL.revokeObjectURL(owned);
-        previous.remove();
-      }
-      let url = "";
-      if (source instanceof Blob) url = URL.createObjectURL(source);
-      else if (typeof source === "string") url = source;
-      if (!url || url.indexOf("file:") === 0) return;
-      const img = document.createElement("img");
-      img.alt = "";
-      img.width = 96;
-      img.height = 72;
-      img.dataset.painted = "0";
-      img.addEventListener("load", () => { img.dataset.painted = "1"; });
-      img.src = url;
-      preview.append(img);
-    }
-    function fillIfBlank(index, url) {
-      const row = rows[index];
-      if (!row || !url || settled.has(index)) return;
-      const img = row.querySelector(".upload-preview img");
-      if (img && (img.dataset.painted === "1" || (img.complete && img.naturalWidth > 0))) return;
-      if (!img || !img.getAttribute("src") || (img.complete && img.naturalWidth === 0)) {
-        setPreview(index, url);
-        return;
-      }
-      img.addEventListener("error", () => {
-        if (img.dataset.painted !== "1") setPreview(index, url);
-      }, { once: true });
-    }
-    function settle(index, phase, message) {
-      if (settled.has(index)) return;
-      settled.add(index);
-      if (phase === "failed") {
-        failures += 1;
-        const row = ensureRow(index);
-        if (row) {
-          row.dataset.phase = "failed";
-          const bar = row.querySelector("progress");
-          const note = row.querySelector(".upload-note");
-          if (bar) bar.hidden = true;
-          if (note) note.textContent = message || "Failed";
-        }
-      } else {
-        finished += 1;
-        const row = rows[index];
-        if (row) {
-          revokeRow(row);
-          row.remove();
-          rows[index] = null;
-        }
-      }
-      paintCount();
-    }
-    paintCount();
-    return {
-      addFiles(more) {
-        const start = batch.length;
-        more.forEach((file) => {
-          batch.push(file);
-          rows.push(null);
-        });
-        paintCount();
-        return start;
-      },
-      update(index, phase, ratio, message, preview) {
-        if (settled.has(index)) return;
-        if (phase === "queued") return;
-        if (phase === "preview") {
-          if (preview) setPreview(index, preview);
-          return;
-        }
-        if (phase === "remote") {
-          if (message) fillIfBlank(index, message);
-          return;
-        }
-        if (phase === "done" || phase === "skipped") {
-          settle(index, phase, message);
-          return;
-        }
-        if (phase === "failed") {
-          settle(index, "failed", message);
-          return;
-        }
-        const row = ensureRow(index);
-        if (!row || settled.has(index)) return;
-        row.dataset.phase = phase;
-        const bar = row.querySelector("progress");
-        const note = row.querySelector(".upload-note");
-        if (bar) bar.hidden = false;
-        if (phase === "uploading") {
-          if (bar && typeof ratio === "number") bar.value = ratio;
-          if (note) note.textContent = "Uploading";
-          return;
-        }
-        if (bar) bar.removeAttribute("value");
-        if (note) note.textContent = "Preparing";
-      },
-    };
-  }
-  function wantedFile(file) {
-    if (!file) return false;
-    const type = file.type || "";
-    if (type.indexOf("image/") === 0 || type.indexOf("video/") === 0) return true;
-    return /\\.(heic|heif|jpe?g|png|webp|gif|mov|mp4|m4v|webm)$/i.test(file.name || "");
-  }
-  function fileFromItem(item) {
-    return new Promise((resolve) => {
-      if (!item || item.kind !== "file") {
-        resolve(null);
-        return;
-      }
-      const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
-      if (entry && entry.isFile && entry.file) {
-        entry.file((file) => resolve(file), () => resolve(item.getAsFile ? item.getAsFile() : null));
-        return;
-      }
-      resolve(item.getAsFile ? item.getAsFile() : null);
-    });
-  }
-  async function filesFromDrop(transfer) {
-    const found = [];
-    const items = transfer && transfer.items ? Array.from(transfer.items) : [];
-    for (const item of items) {
-      const file = await fileFromItem(item);
-      if (wantedFile(file)) found.push(file);
-    }
-    if (!found.length && transfer && transfer.files && transfer.files.length) {
-      Array.from(transfer.files).forEach((file) => {
-        if (wantedFile(file)) found.push(file);
-      });
-    }
-    return found;
-  }
-  async function send(files) {
-    if (!files.length) return;
-    if (acceptMore) {
-      acceptMore(files);
-      return;
-    }
-    busy = true;
-    const rows = showUpload(files);
-    const extra = [];
-    let enqueue = null;
-    acceptMore = (more) => {
-      rows.addFiles(more);
-      if (enqueue) enqueue(more);
-      else extra.push(more);
-    };
-    try {
-      const upload = await uploader();
-      const result = await upload(slug, files, names(), say, rows.update, (append) => {
-        enqueue = append;
-        extra.splice(0).forEach((group) => append(group));
-      });
-      result.added.forEach(tile);
-      const skipped = result.skipped || [];
-      const skipNote = skipped.map((name) => "Skipped " + name + " because it is already there.").join(" ");
-      if (result.error) say(skipNote ? result.error + " " + skipNote : result.error);
-      else if (skipNote && result.added.length) say("Added to the gallery. " + skipNote);
-      else if (skipNote) say(skipNote);
-      else if (result.added.some((item) => item.posterFailed)) say("Added to the gallery. Login poster failed.");
-      else say(result.added.length ? "Added to the gallery." : "Nothing was added.");
-    } catch (error) {
-      say(error && error.message ? error.message : "Could not add those files.");
-    } finally {
-      acceptMore = null;
-      busy = false;
-    }
-  }
-  if (input) {
-    input.addEventListener("change", () => {
-      const files = input.files ? Array.from(input.files) : [];
-      input.value = "";
-      void send(files);
-    });
-  }
-  if (drop) {
-    ["dragenter", "dragover"].forEach((name) => {
-      drop.addEventListener(name, (event) => {
-        event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-        drop.classList.add("dragover");
-      });
-    });
-    drop.addEventListener("dragleave", (event) => {
-      event.preventDefault();
-      drop.classList.remove("dragover");
-    });
-    drop.addEventListener("drop", (event) => {
-      event.preventDefault();
-      drop.classList.remove("dragover");
-      void filesFromDrop(event.dataTransfer).then((list) => send(list));
-    });
-  }
 })();
 </script>`;
 }
@@ -944,6 +568,6 @@ export async function renderJournal(bucket, url) {
   const edit = `${PREFIX}/author/?trip=${encodeURIComponent(slug)}`;
   return page(
     data.title || slug,
-    `<p class="meta"><a href="${PREFIX}/">Trips</a> · <a class="edit-trip" href="${edit}">Edit</a></p><h1>${escapeHtml(data.title || slug)}</h1><p class="meta">${escapeHtml(where)}</p>${gallery}${renderBody(body)}${days.join("")}${tripViewer(slug)}`,
+    `<p class="meta"><a href="${PREFIX}/">Trips</a> · <a class="edit-trip" href="${edit}">Edit</a></p><h1>${escapeHtml(data.title || slug)}</h1><p class="meta">${escapeHtml(where)}</p>${gallery}${renderBody(body)}${days.join("")}${tripViewer()}`,
   );
 }

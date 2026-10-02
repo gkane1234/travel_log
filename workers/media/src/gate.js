@@ -31,6 +31,10 @@ export function loginSetCookie(token) {
   return `${MEDIA_COOKIE}=${token}; HttpOnly; Secure; Path=/travel-log; SameSite=Lax; Max-Age=2592000`;
 }
 
+export function logoutSetCookie() {
+  return `${MEDIA_COOKIE}=; HttpOnly; Secure; Path=/travel-log; SameSite=Lax; Max-Age=0`;
+}
+
 export function safeNext(value) {
   const next = String(value || "");
   if (!next.startsWith("/travel-log")) return "";

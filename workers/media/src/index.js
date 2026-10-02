@@ -3,7 +3,7 @@ import { POSTER_MAX_BYTES, PUBLIC_PREFIX, isAllowedKey, isAllowedType, isPosterK
 import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "./journal.js";
 import { posterStage } from "./motion.js";
 import { listTripNoteKeys, putTripNotes, readTripNotes } from "./notes.js";
-import { checkLogin, loginPage, mediaGate, safeNext } from "./gate.js";
+import { checkLogin, loginPage, logoutSetCookie, mediaGate, safeNext } from "./gate.js";
 
 function json(body, status, extra = {}) {
   return new Response(JSON.stringify(body), {
@@ -294,6 +294,17 @@ export default {
         }
       }
       return proxyTravelLog(request, env, url);
+    }
+
+    if (request.method === "POST" && path === `${PUBLIC_PREFIX}/logout`) {
+      return new Response(null, {
+        status: 303,
+        headers: {
+          Location: `${PUBLIC_PREFIX}/login`,
+          "Set-Cookie": logoutSetCookie(),
+          "Cache-Control": "no-store",
+        },
+      });
     }
 
     if (request.method === "POST" && path === `${PUBLIC_PREFIX}/login`) {

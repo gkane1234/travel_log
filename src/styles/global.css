@@ -85,6 +85,23 @@ img {
   color: var(--ink);
 }
 
+.site-nav form {
+  margin: 0;
+}
+
+.site-nav button {
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.site-nav button:hover {
+  color: var(--ink);
+}
+
 .site-main {
   max-width: 68rem;
   margin: 0 auto;

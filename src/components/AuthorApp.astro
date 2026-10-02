@@ -99,6 +99,11 @@ const { slug = "" } = Astro.props;
         Summary
         <input name="summary" placeholder="A week of rainforest and coast." />
       </label>
+      <label class="file-btn">
+        Add photos and videos
+        <input id="create-media" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" hidden />
+      </label>
+      <p class="meta">Optional. Add many at once. After the trip is created, you place each one in a day.</p>
       <button type="submit">Create trip</button>
       <p id="create-error" class="error" hidden></p>
     </form>
@@ -138,19 +143,25 @@ const { slug = "" } = Astro.props;
 
     <p id="status" class="meta" aria-live="polite"></p>
 
+    <div class="media-pool">
+      <p class="meta">Photos and videos</p>
+      <p id="pool-hint" class="meta">Add many at once. Click a photo or video, then click in the day where it should go. Or drag it into the note.</p>
+      <div id="media-pool" class="cover-grid"></div>
+    </div>
+
     <div id="dropzone" class="dropzone">
       <textarea
         id="day-body"
         rows="18"
         placeholder="Write this day's notes. Drop photos, videos, or GPX here (or use the buttons)."
       ></textarea>
-      <div class="drop-hint">Drop .heic / .jpg / .png / .webp / .mp4 / .mov / .gpx / .zip onto the text. Photos are re-saved without location data. Video location data may remain. Notes and routes are stored with the trip, not in git.</div>
+      <div class="drop-hint">Drop photos, videos, or GPX here. Photos and videos are added to the grid above so you can see them before they go in the day. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
     </div>
 
     <div class="upload-row">
       <label class="file-btn">
-        Add photo / video
-        <input id="media-input" type="file" accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" hidden />
+        Add photos / videos
+        <input id="media-input" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" hidden />
       </label>
       <label class="file-btn">
         Add GPX
@@ -285,11 +296,16 @@ const { slug = "" } = Astro.props;
     border-color: var(--accent);
     outline: 2px solid var(--accent);
   }
-  .cover-choice img {
+  .cover-choice img,
+  .cover-choice video {
     width: 100%;
     aspect-ratio: 4 / 3;
     object-fit: cover;
     background: #e4ddd0;
+    pointer-events: none;
+  }
+  .media-pool {
+    margin: 0.25rem 0 0.75rem;
   }
   .cover-choice span {
     font-family: var(--font-ui);

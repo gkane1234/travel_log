@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   applySiteBase,
   buildCommitRequest,
@@ -6,6 +7,10 @@ import {
   dayRepoPath,
   gitCommitPlan,
   imageMarkdownUrl,
+  gatedMediaUrl,
+  placedImageMarkdown,
+  placedMediaInMarkdown,
+  placedVideoMarkdown,
   mediaObjectKey,
   coverMediaUrl,
   photoPathsInMarkdown,
@@ -302,5 +307,37 @@ assert.match(loginHtml, /Sep 5, 2026/);
 assert.match(loginHtml, /Wrong username or password/);
 assert.equal(loginHtml.includes("/travel-log/media/"), false);
 assert.equal(loginHtml.includes("private day text"), false);
+
+assert.equal(
+  placedImageMarkdown("olympic-peninsula", "img-5123-2.jpg", "img-5123-2"),
+  "![img-5123-2](/trip-media/olympic-peninsula/photos/img-5123-2.jpg)",
+);
+assert.equal(
+  placedVideoMarkdown("olympic-peninsula", "img-5131.mp4"),
+  '<TripVideo src="/trip-media/olympic-peninsula/photos/img-5131.mp4" />',
+);
+assert.equal(gatedMediaUrl("olympic-peninsula", "img-5123-2.jpg"), "/travel-log/media/olympic-peninsula/photos/img-5123-2.jpg");
+assert.equal(gatedMediaUrl("olympic-peninsula", "img-5131.mp4"), "/travel-log/media/olympic-peninsula/photos/img-5131.mp4");
+assert.deepEqual(
+  placedMediaInMarkdown(
+    "olympic-peninsula",
+    '![img-5123](/trip-media/olympic-peninsula/photos/img-5123-2.jpg)\n\n<TripVideo src="/trip-media/olympic-peninsula/photos/img-5131.mp4" />',
+  ).map((item) => item.filename),
+  ["img-5123-2.jpg", "img-5131.mp4"],
+);
+
+const authorMarkup = readFileSync(new URL("../src/components/AuthorApp.astro", import.meta.url), "utf8");
+assert.match(authorMarkup, /id="media-input"[^>]*multiple/);
+assert.match(authorMarkup, /id="create-media"[^>]*multiple/);
+assert.match(authorMarkup, /id="media-pool"/);
+const authorUi = readFileSync(new URL("../src/lib/github/author-ui.ts", import.meta.url), "utf8");
+assert.match(authorUi, /gatedMediaUrl\(trip\.slug, item\.filename\)/);
+assert.match(authorUi, /img\.src = src/);
+assert.match(authorUi, /video\.src = src/);
+assert.match(authorUi, /placedImageMarkdown/);
+assert.match(authorUi, /placedVideoMarkdown/);
+const preview = `<img src="${gatedMediaUrl("olympic-peninsula", "img-5123-2.jpg")}" alt="img-5123-2.jpg" />`;
+assert.match(preview, /src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
+assert.equal(preview.includes("r2.dev"), false);
 
 console.log("github author checks ok");

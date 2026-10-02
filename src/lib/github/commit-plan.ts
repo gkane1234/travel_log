@@ -64,6 +64,58 @@ export function videoMarkdownUrl(url: string): string {
   return `<TripVideo src="${url}" />`;
 }
 
+const MEDIA_FILENAME = /^[a-z0-9][a-z0-9._-]{0,160}$/;
+const VIDEO_EXT = /\.(mp4|m4v|webm|mov)$/i;
+
+export function tripMediaPath(slug: string, filename: string): string {
+  return `/trip-media/${slug}/photos/${filename}`;
+}
+
+/** Login-gated address for a photo or video. The author previews use this so the cookie loads them. */
+export function gatedMediaUrl(slug: string, filename: string): string {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || !MEDIA_FILENAME.test(filename)) return "";
+  return `/travel-log/media/${slug}/photos/${filename}`;
+}
+
+export function placedImageMarkdown(slug: string, filename: string, alt: string): string {
+  const safeAlt = alt.replace(/[\[\]]/g, "");
+  return `![${safeAlt}](${tripMediaPath(slug, filename)})`;
+}
+
+export function placedVideoMarkdown(slug: string, filename: string): string {
+  return `<TripVideo src="${tripMediaPath(slug, filename)}" />`;
+}
+
+export type PlacedMedia = { kind: "photo" | "video"; filename: string; path: string };
+
+function filenameFromMediaSrc(slug: string, src: string): string {
+  const value = String(src || "").trim().split(/[?#]/)[0];
+  const tripMedia = value.match(/\/trip-media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/);
+  if (tripMedia && tripMedia[1] === slug) return tripMedia[2];
+  const direct = value.match(/\/media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/);
+  if (direct && direct[1] === slug) return direct[2];
+  return "";
+}
+
+/** Photos and videos already written into a day note. */
+export function placedMediaInMarkdown(slug: string, markdown: string): PlacedMedia[] {
+  const found: PlacedMedia[] = [];
+  const add = (kind: "photo" | "video", filename: string) => {
+    if (!filename || found.some((item) => item.filename === filename)) return;
+    found.push({ kind, filename, path: tripMediaPath(slug, filename) });
+  };
+  for (const match of markdown.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+    const filename = filenameFromMediaSrc(slug, match[1]);
+    if (!filename) continue;
+    add(VIDEO_EXT.test(filename) ? "video" : "photo", filename);
+  }
+  for (const match of markdown.matchAll(/<TripVideo\s+src="([^"]+)"\s*\/?\s*>/g)) {
+    const filename = filenameFromMediaSrc(slug, match[1]);
+    if (filename && VIDEO_EXT.test(filename)) add("video", filename);
+  }
+  return found;
+}
+
 export function mediaObjectKey(slug: string, filename: string): string {
   return `media/${slug}/photos/${filename}`;
 }

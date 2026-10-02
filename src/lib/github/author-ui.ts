@@ -1,12 +1,14 @@
 import {
   dayRepoPath,
   filenamesIn,
-  imageMarkdownUrl,
   indexRepoPath,
   coverMediaUrl,
+  gatedMediaUrl,
   indexTrips,
-  photoPathsInMarkdown,
-  videoMarkdownUrl,
+  placedImageMarkdown,
+  placedMediaInMarkdown,
+  placedVideoMarkdown,
+  type PlacedMedia,
 } from "./commit-plan.ts";
 import { addDays, slugify } from "./dates.ts";
 import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip } from "./frontmatter.ts";
@@ -16,6 +18,13 @@ import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
 import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 
 type PreparedRoute = { repoPath: string; bytes: Uint8Array };
+
+type PoolItem = {
+  kind: "photo" | "video";
+  filename: string;
+  path: string;
+  markdown: string;
+};
 
 function insertAtCursor(textarea: HTMLTextAreaElement, text: string): void {
   const start = textarea.selectionStart ?? textarea.value.length;
@@ -75,7 +84,12 @@ export function mountAuthor(root: HTMLElement): void {
   const publishBtn = must<HTMLButtonElement>(root, "publish-trip");
   const coverChoices = must<HTMLElement>(root, "cover-choices");
   const saveCoverBtn = must<HTMLButtonElement>(root, "save-cover");
+  const mediaPool = must<HTMLElement>(root, "media-pool");
+  const poolHint = must<HTMLElement>(root, "pool-hint");
+  const createMedia = must<HTMLInputElement>(root, "create-media");
   let selectedCover = "";
+  let poolItems: PoolItem[] = [];
+  let selectedPath = "";
 
   function show(name: keyof typeof screens): void {
     for (const [key, el] of Object.entries(screens)) {
@@ -112,8 +126,9 @@ export function mountAuthor(root: HTMLElement): void {
     homeUrl.value = authorUrl();
   }
 
-  function setStatus(message: string): void {
+  function setStatus(message: string, isError = false): void {
     statusEl.textContent = message;
+    statusEl.classList.toggle("error", isError);
   }
 
   function showSettingsError(message: string): void {
@@ -234,12 +249,84 @@ export function mountAuthor(root: HTMLElement): void {
     markCoverSelection();
   }
 
-  async function refreshCoverChoices(): Promise<void> {
+  function poolItemFrom(item: PlacedMedia): PoolItem {
+    if (!trip) throw new Error("Open a trip first.");
+    const alt = item.filename.replace(/\.[^.]+$/, "");
+    return {
+      kind: item.kind,
+      filename: item.filename,
+      path: item.path,
+      markdown: item.kind === "video" ? placedVideoMarkdown(trip.slug, item.filename) : placedImageMarkdown(trip.slug, item.filename, alt),
+    };
+  }
+
+  function renderPool(): void {
+    poolHint.textContent = selectedPath
+      ? "Click in the day where this should go, or drag it into the note."
+      : "Add many at once. Click a photo or video, then click in the day where it should go. Or drag it into the note.";
+    mediaPool.replaceChildren();
+    if (!trip || !poolItems.length) {
+      const empty = document.createElement("p");
+      empty.className = "meta";
+      empty.textContent = "No photos or videos yet.";
+      mediaPool.append(empty);
+      return;
+    }
+    for (const item of poolItems) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "cover-choice";
+      button.draggable = true;
+      button.dataset.path = item.path;
+      const selected = item.path === selectedPath;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+      const src = gatedMediaUrl(trip.slug, item.filename);
+      if (item.kind === "video") {
+        const video = document.createElement("video");
+        video.src = src;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        video.setAttribute("aria-label", item.filename);
+        video.addEventListener("loadeddata", () => {
+          try {
+            if (video.currentTime < 0.01) video.currentTime = 0.1;
+          } catch {
+            /* A missing frame still leaves the video preview. */
+          }
+        });
+        button.append(video);
+      } else if (src) {
+        const img = document.createElement("img");
+        img.src = src;
+        img.alt = item.filename;
+        button.append(img);
+      }
+      const name = document.createElement("span");
+      name.textContent = item.filename;
+      button.append(name);
+      button.addEventListener("click", () => {
+        selectedPath = selectedPath === item.path ? "" : item.path;
+        renderPool();
+      });
+      button.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("application/x-travel-log", item.markdown);
+        event.dataTransfer?.setData("text/plain", item.markdown);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
+      });
+      mediaPool.append(button);
+    }
+  }
+
+  async function refreshLibrary(): Promise<void> {
     if (!trip) return;
-    const found: string[] = [];
+    const fromNotes: PoolItem[] = [];
+    const photoPaths: string[] = [];
     const add = (markdown: string) => {
-      for (const path of photoPathsInMarkdown(trip!.slug, markdown)) {
-        if (!found.includes(path)) found.push(path);
+      for (const item of placedMediaInMarkdown(trip!.slug, markdown)) {
+        if (!fromNotes.some((entry) => entry.path === item.path)) fromNotes.push(poolItemFrom(item));
+        if (item.kind === "photo" && !photoPaths.includes(item.path)) photoPaths.push(item.path);
       }
     };
     for (const date of [...trip.dayDates].sort()) {
@@ -248,7 +335,13 @@ export function mountAuthor(root: HTMLElement): void {
       add(raw ?? "");
     }
     add(bodyEl.value);
-    fillCoverGrid(found);
+    const sessionOnly = poolItems.filter((item) => !fromNotes.some((entry) => entry.path === item.path));
+    poolItems = [...fromNotes, ...sessionOnly];
+    for (const item of sessionOnly) {
+      if (item.kind === "photo" && !photoPaths.includes(item.path)) photoPaths.push(item.path);
+    }
+    renderPool();
+    fillCoverGrid(photoPaths);
   }
 
   async function persistCover(cover: string): Promise<void> {
@@ -279,12 +372,15 @@ export function mountAuthor(root: HTMLElement): void {
     url.searchParams.set("trip", trip.slug);
     url.searchParams.set("date", date);
     history.replaceState({}, "", url);
-    await refreshCoverChoices();
+    await refreshLibrary();
     setStatus(`Editing ${date}. Save updates the travel log.`);
   }
 
   async function openTrip(slug: string, date?: string): Promise<void> {
     show("editor");
+    poolItems = [];
+    selectedPath = "";
+    renderPool();
     setStatus("Loading…");
     try {
       await loadBucketPaths();
@@ -324,7 +420,7 @@ export function mountAuthor(root: HTMLElement): void {
       setStatus("Saved to the travel log.");
       return true;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Save failed");
+      setStatus(error instanceof Error ? error.message : "Save failed", true);
       return false;
     } finally {
       saving = false;
@@ -358,83 +454,143 @@ export function mountAuthor(root: HTMLElement): void {
       if (cover && !trip.cover) trip = { ...trip, cover };
       dirty = false;
       const usedCover = Boolean(cover && trip.cover === cover);
-      await refreshCoverChoices();
+      await refreshLibrary();
       setStatus(usedCover ? "Saved. That photo is the trip thumbnail." : "Saved to the travel log.");
     } catch (error) {
       dirty = true;
-      setStatus(error instanceof Error ? error.message : "Save failed");
+      setStatus(error instanceof Error ? error.message : "Save failed", true);
     } finally {
       saving = false;
     }
   }
 
-  async function handleFiles(files: File[]): Promise<void> {
-    if (!trip || !files.length) return;
-    const photos = filenamesIn(paths, trip.slug, "photos");
-    const routes = filenamesIn(paths, trip.slug, "routes");
-    const prepared = [];
-    for (const file of files) {
-      setStatus(`Preparing ${file.name}…`);
-      try {
-        prepared.push(await prepareDroppedFile(file, trip.slug, photos, routes));
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "Could not add that file.");
-        return;
-      }
+  function knownMediaNames(): Set<string> {
+    const names = filenamesIn(paths, trip?.slug || "", "photos");
+    for (const item of poolItems) names.add(item.filename);
+    if (trip) {
+      for (const item of placedMediaInMarkdown(trip.slug, bodyEl.value)) names.add(item.filename);
     }
+    return names;
+  }
 
-    const ready: { markdown: string; route?: PreparedRoute; cover?: string }[] = [];
+  function placeMarkdown(markdown: string, offset?: number): void {
+    if (offset != null) {
+      bodyEl.focus();
+      const pos = Math.max(0, Math.min(offset, bodyEl.value.length));
+      bodyEl.setSelectionRange(pos, pos);
+    }
+    insertAtCursor(bodyEl, markdown);
+    selectedPath = "";
+    dirty = true;
+    renderPool();
+    setStatus("Placed in this day. Save day to keep it.");
+  }
+
+  function dropCaret(x: number, y: number): number {
+    const doc = document as Document & {
+      caretPositionFromPoint?: (clientX: number, clientY: number) => { offsetNode: Node; offset: number } | null;
+      caretRangeFromPoint?: (clientX: number, clientY: number) => Range | null;
+    };
+    const pos = doc.caretPositionFromPoint?.(x, y);
+    if (pos?.offsetNode === bodyEl) return pos.offset;
+    const range = doc.caretRangeFromPoint?.(x, y);
+    if (range?.startContainer === bodyEl) return range.startOffset;
+    return bodyEl.selectionStart ?? bodyEl.value.length;
+  }
+
+  let uploading = false;
+
+  async function uploadMedia(files: File[]): Promise<void> {
+    if (!trip || !files.length) return;
+    if (uploading) {
+      setStatus("An upload is already running.", true);
+      return;
+    }
+    uploading = true;
+    try {
+    const photos = knownMediaNames();
+    const routes = filenamesIn(paths, trip.slug, "routes");
     let posterWarning = "";
-    for (const item of prepared) {
-      if (item.kind === "route" && item.repoPath) {
-        ready.push({
-          markdown: item.markdown,
-          route: { repoPath: item.repoPath, bytes: item.bytes },
-        });
+    let uploaded = 0;
+    const problems: string[] = [];
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      setStatus(`Preparing ${index + 1} of ${files.length}: ${file.name}`);
+      let prepared;
+      try {
+        prepared = await prepareDroppedFile(file, trip.slug, photos, routes);
+      } catch (error) {
+        problems.push(error instanceof Error ? error.message : `Could not add ${file.name}.`);
         continue;
       }
-      if (!item.objectKey || !item.contentType) {
-        setStatus("Could not prepare that file.");
-        return;
+      if (prepared.kind === "route" && prepared.repoPath) {
+        insertAtCursor(bodyEl, prepared.markdown);
+        dirty = true;
+        await saveWithFiles([{ repoPath: prepared.repoPath, bytes: prepared.bytes }]);
+        continue;
       }
-      setStatus(`Uploading ${item.filename}…`);
+      if (prepared.kind !== "photo" && prepared.kind !== "video") continue;
+      if (!prepared.objectKey || !prepared.contentType) {
+        problems.push(`Could not prepare ${file.name}.`);
+        continue;
+      }
+      setStatus(`Uploading ${index + 1} of ${files.length}: ${prepared.filename}`);
       try {
-        const url = await uploadToBucket({
+        await uploadToBucket({
           workerUrl: notesTarget().workerUrl,
           token: notesTarget().token,
-          objectKey: item.objectKey,
-          bytes: item.bytes,
-          contentType: item.contentType,
+          objectKey: prepared.objectKey,
+          bytes: prepared.bytes,
+          contentType: prepared.contentType,
         });
-        const alt = item.filename.replace(/\.[^.]+$/, "");
-        if (item.kind === "photo") {
+        if (prepared.kind === "photo") {
           try {
-            const posterBlob = await makePoster(new Blob([item.bytes], { type: "image/jpeg" }));
+            const posterBlob = await makePoster(new Blob([prepared.bytes], { type: "image/jpeg" }));
             await uploadToBucket({
               workerUrl: notesTarget().workerUrl,
               token: notesTarget().token,
-              objectKey: posterObjectKey(trip.slug, item.filename),
+              objectKey: posterObjectKey(trip.slug, prepared.filename),
               bytes: new Uint8Array(await posterBlob.arrayBuffer()),
               contentType: "image/jpeg",
             });
           } catch (error) {
             posterWarning = error instanceof Error ? error.message : "Could not make the login poster.";
           }
+          if (!trip.cover) {
+            try {
+              await persistCover(`/trip-media/${trip.slug}/photos/${prepared.filename}`);
+            } catch {
+              problems.push("The photo uploaded, but the thumbnail was not saved.");
+            }
+          }
         }
-        ready.push({
-          markdown: item.kind === "video" ? videoMarkdownUrl(url) : imageMarkdownUrl(url, alt),
-          cover: item.kind === "photo" ? `/trip-media/${trip.slug}/photos/${item.filename}` : undefined,
+        const placed = poolItemFrom({
+          kind: prepared.kind,
+          filename: prepared.filename,
+          path: `/trip-media/${trip.slug}/photos/${prepared.filename}`,
         });
+        if (!poolItems.some((item) => item.path === placed.path)) poolItems.push(placed);
+        uploaded += 1;
+        renderPool();
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : "Upload failed");
-        return;
+        problems.push(error instanceof Error ? error.message : `Upload of ${file.name} failed.`);
       }
     }
-
-    for (const item of ready) insertAtCursor(bodyEl, item.markdown);
-    const cover = trip.cover ? "" : ready.find((item) => item.cover)?.cover || "";
-    await saveWithFiles(ready.flatMap((item) => (item.route ? [item.route] : [])), cover || undefined);
-    if (posterWarning) setStatus(`Saved the photo. Login poster failed: ${posterWarning}`);
+    try {
+      await refreshLibrary();
+    } catch {
+      renderPool();
+    }
+    if (problems.length) {
+      setStatus(problems[0], true);
+    } else if (uploaded) {
+      const noun = uploaded === 1 ? "file" : "files";
+      const poster = posterWarning ? ` Login poster failed: ${posterWarning}` : "";
+      setStatus(`Uploaded ${uploaded} ${noun}. Click one, then click in the day to place it.${poster}`);
+    }
+    } finally {
+      uploading = false;
+    }
   }
 
   function renderList(trips: RemoteTrip[]): void {
@@ -567,11 +723,19 @@ export function mountAuthor(root: HTMLElement): void {
         },
         "",
       );
+      const picked = createMedia.files ? [...createMedia.files] : [];
       await saveNotes([
         { path: indexRepoPath(slug), text: index },
         { path: dayRepoPath(slug, date), text: "\n" },
       ]);
-      location.assign(`${base}author/?trip=${encodeURIComponent(slug)}&date=${encodeURIComponent(date)}`);
+      createForm.reset();
+      if (slugInput) delete slugInput.dataset.touched;
+      const next = new URL(`${base}author/`, location.origin);
+      next.searchParams.set("trip", slug);
+      next.searchParams.set("date", date);
+      history.pushState({}, "", next);
+      await openTrip(slug, date);
+      if (picked.length) await uploadMedia(picked);
     } catch (error) {
       createError.textContent = error instanceof Error ? error.message : "Could not create the trip.";
       createError.hidden = false;
@@ -630,12 +794,18 @@ export function mountAuthor(root: HTMLElement): void {
   mediaInput.addEventListener("change", () => {
     const files = mediaInput.files ? [...mediaInput.files] : [];
     mediaInput.value = "";
-    void handleFiles(files);
+    void uploadMedia(files);
   });
   gpxInput.addEventListener("change", () => {
     const files = gpxInput.files ? [...gpxInput.files] : [];
     gpxInput.value = "";
-    void handleFiles(files);
+    void uploadMedia(files);
+  });
+  bodyEl.addEventListener("click", () => {
+    if (!selectedPath || bodyEl.selectionStart !== bodyEl.selectionEnd) return;
+    const item = poolItems.find((entry) => entry.path === selectedPath);
+    if (!item) return;
+    placeMarkdown(item.markdown);
   });
 
   for (const eventName of ["dragenter", "dragover"]) {
@@ -651,8 +821,15 @@ export function mountAuthor(root: HTMLElement): void {
     });
   }
   dropzone.addEventListener("drop", (event) => {
+    const custom = event.dataTransfer?.getData("application/x-travel-log") || "";
+    const plain = event.dataTransfer?.getData("text/plain") || "";
+    const markdown = custom || (plain.startsWith("![") || plain.startsWith("<TripVideo") ? plain : "");
+    if (markdown) {
+      placeMarkdown(markdown, dropCaret(event.clientX, event.clientY));
+      return;
+    }
     const files = event.dataTransfer?.files;
-    if (files?.length) void handleFiles([...files]);
+    if (files?.length) void uploadMedia([...files]);
   });
 
   window.addEventListener("keydown", (event) => {

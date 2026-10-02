@@ -20,6 +20,7 @@ import { dateRangeRefusal, dayNotesOutsideRange, type DayNote } from "./trip-det
 import { filesFromTransfer } from "./drop-files.ts";
 import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 import { beginUploadList } from "./upload-progress.ts";
+import { createGate, createUploadQueue } from "./upload-pool.ts";
 
 type PreparedRoute = { repoPath: string; bytes: Uint8Array };
 
@@ -28,6 +29,7 @@ type PoolItem = {
   filename: string;
   path: string;
   markdown: string;
+  previewUrl?: string;
 };
 
 function insertAtCursor(textarea: HTMLTextAreaElement, text: string): void {
@@ -425,12 +427,19 @@ export function mountAuthor(root: HTMLElement): void {
           }
         });
         button.append(video);
-      } else if (src) {
+      } else if (src || item.previewUrl) {
         const img = document.createElement("img");
-        img.src = src;
         img.alt = "";
         img.width = 120;
         img.height = 90;
+        img.dataset.painted = "0";
+        img.addEventListener("load", () => {
+          img.dataset.painted = "1";
+        });
+        img.addEventListener("error", () => {
+          if (src && img.dataset.painted !== "1" && img.getAttribute("src") !== src) img.src = src;
+        });
+        img.src = item.previewUrl || src;
         button.append(img);
       }
       button.addEventListener("pointerenter", () => {
@@ -641,145 +650,228 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   let uploading = false;
+  let acceptMore: ((more: File[]) => void) | null = null;
+
+  function forgetPoolItem(path: string): void {
+    const current = poolItems.find((item) => item.path === path);
+    if (current?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(current.previewUrl);
+    poolItems = poolItems.filter((item) => item.path !== path);
+    renderPool();
+  }
+
+  function fillPoolIfBlank(path: string, remote: string): void {
+    if (!remote) return;
+    const button = mediaPool.querySelector(`button[data-path="${CSS.escape(path)}"]`);
+    const img = button?.querySelector("img");
+    if (!(img instanceof HTMLImageElement)) return;
+    if (img.dataset.painted === "1" || (img.complete && img.naturalWidth > 0)) return;
+    if (img.complete) img.src = remote;
+    else {
+      img.addEventListener(
+        "error",
+        () => {
+          if (img.dataset.painted !== "1") img.src = remote;
+        },
+        { once: true },
+      );
+    }
+  }
 
   async function uploadMedia(files: File[]): Promise<void> {
     if (!trip || !files.length) return;
-    if (uploading) {
-      setStatus("An upload is already running.", true);
+    if (acceptMore) {
+      acceptMore(files);
       return;
     }
+    const slug = trip.slug;
     uploading = true;
     const progress = beginUploadList(uploadList, uploadTemplate, files);
+    const buffer: { more: File[]; start: number }[] = [];
+    let nextIndex = files.length;
+    let dispatch: ((more: File[], start: number) => void) | null = null;
+    acceptMore = (more) => {
+      const start = nextIndex;
+      nextIndex += more.length;
+      progress.addFiles(more);
+      if (dispatch) dispatch(more, start);
+      else buffer.push({ more, start });
+    };
     try {
-    const photos = knownMediaNames();
-    const routes = filenamesIn(paths, trip.slug, "routes");
-    let posterWarning = "";
-    let uploaded = 0;
-    const problems: string[] = [];
-    const skipped: string[] = [];
-    setStatus("Checking files already on this trip…");
-    let hashes;
-    try {
-      hashes = await hashesForMedia(trip.slug, photos);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not check files already on this trip.";
-      files.forEach((_, index) => progress.update(index, "failed", { note: message }));
-      setStatus(message, true);
-      return;
-    }
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
-      const planned = plannedMediaFilename(file.name);
-      if (planned && mediaDuplicate(planned, "", photos, hashes)) {
-        skipped.push(file.name);
-        progress.update(index, "skipped", { note: skippedNote(file.name) });
-        setStatus(skippedNote(file.name));
-        continue;
-      }
-      progress.update(index, "preparing");
-      setStatus(`Preparing ${index + 1} of ${files.length}: ${file.name}`);
-      let prepared;
+      const photos = knownMediaNames();
+      const routes = filenamesIn(paths, slug, "routes");
+      let posterWarning = "";
+      let uploaded = 0;
+      const problems: string[] = [];
+      const skipped: string[] = [];
+      const claimed = new Set<string>();
+      const pendingHashes = new Set<string>();
+      const gate = createGate();
+      setStatus("Checking files already on this trip…");
+      let hashes;
       try {
-        prepared = await prepareDroppedFile(file, trip.slug, photos, routes);
+        hashes = await hashesForMedia(slug, photos);
       } catch (error) {
-        const message = error instanceof Error ? error.message : `Could not add ${file.name}.`;
-        problems.push(message);
-        progress.update(index, "failed", { note: message });
-        continue;
+        const message = error instanceof Error ? error.message : "Could not check files already on this trip.";
+        for (let index = 0; index < nextIndex; index += 1) {
+          progress.update(index, "failed", { note: message });
+        }
+        setStatus(message, true);
+        return;
       }
-      if (prepared.kind === "route" && prepared.repoPath) {
-        insertAtCursor(bodyEl, prepared.markdown);
-        dirty = true;
-        await saveWithFiles([{ repoPath: prepared.repoPath, bytes: prepared.bytes }]);
-        progress.update(index, "done", { note: "Added" });
-        continue;
-      }
-      if (prepared.kind !== "photo" && prepared.kind !== "video") {
-        progress.update(index, "failed", { note: `${file.name} is not a photo or video.` });
-        continue;
-      }
-      if (!prepared.objectKey || !prepared.contentType) {
-        const message = `Could not prepare ${file.name}.`;
-        problems.push(message);
-        progress.update(index, "failed", { note: message });
-        continue;
-      }
-      const hash = await sha256Hex(prepared.bytes);
-      if (mediaDuplicate("", hash, photos, hashes)) {
-        photos.delete(prepared.filename);
-        skipped.push(file.name);
-        progress.update(index, "skipped", { note: skippedNote(file.name) });
-        setStatus(skippedNote(file.name));
-        continue;
-      }
-      progress.update(index, "uploading", { ratio: 0 });
-      setStatus(`Uploading ${index + 1} of ${files.length}: ${prepared.filename}`);
-      try {
-        await uploadToBucket({
-          workerUrl: notesTarget().workerUrl,
-          token: notesTarget().token,
-          objectKey: prepared.objectKey,
-          bytes: prepared.bytes,
-          contentType: prepared.contentType,
-          onProgress: (ratio) => progress.update(index, "uploading", { ratio }),
+      const queue = createUploadQueue(async (job: { file: File; index: number }) => {
+        const { file, index } = job;
+        const planned = plannedMediaFilename(file.name);
+        progress.update(index, "preparing");
+        let prepared;
+        try {
+          prepared = await prepareDroppedFile(file, slug, photos, routes);
+        } catch (error) {
+          if (planned) claimed.delete(planned);
+          const message = error instanceof Error ? error.message : `Could not add ${file.name}.`;
+          problems.push(message);
+          progress.update(index, "failed", { note: message });
+          return;
+        }
+        if (prepared.kind === "route" && prepared.repoPath) {
+          insertAtCursor(bodyEl, prepared.markdown);
+          dirty = true;
+          await saveWithFiles([{ repoPath: prepared.repoPath, bytes: prepared.bytes }]);
+          progress.update(index, "done", { note: "Added" });
+          return;
+        }
+        if (prepared.kind !== "photo" && prepared.kind !== "video") {
+          if (planned) claimed.delete(planned);
+          progress.update(index, "failed", { note: `${file.name} is not a photo or video.` });
+          return;
+        }
+        if (!prepared.objectKey || !prepared.contentType) {
+          if (planned) claimed.delete(planned);
+          const message = `Could not prepare ${file.name}.`;
+          problems.push(message);
+          progress.update(index, "failed", { note: message });
+          return;
+        }
+        const hash = await sha256Hex(prepared.bytes);
+        const duplicate = await gate(() => {
+          if (mediaDuplicate("", hash, photos, hashes) || pendingHashes.has(hash)) {
+            photos.delete(prepared.filename);
+            return true;
+          }
+          pendingHashes.add(hash);
+          hashes.set(hash, prepared.filename);
+          return false;
         });
-        if (prepared.kind === "photo") {
-          try {
-            const posterBlob = await makePoster(new Blob([prepared.bytes], { type: "image/jpeg" }));
-            await uploadToBucket({
-              workerUrl: notesTarget().workerUrl,
-              token: notesTarget().token,
-              objectKey: posterObjectKey(trip.slug, prepared.filename),
-              bytes: new Uint8Array(await posterBlob.arrayBuffer()),
-              contentType: "image/jpeg",
-            });
-          } catch (error) {
-            posterWarning = error instanceof Error ? error.message : "Could not make the login poster.";
-          }
-          if (!trip.cover) {
-            try {
-              await persistCover(`/trip-media/${trip.slug}/photos/${prepared.filename}`);
-            } catch {
-              problems.push("The photo uploaded, but the thumbnail was not saved.");
-            }
-          }
+        if (duplicate) {
+          skipped.push(file.name);
+          progress.update(index, "skipped", { note: skippedNote(file.name) });
+          return;
         }
         const placed = poolItemFrom({
           kind: prepared.kind,
           filename: prepared.filename,
-          path: `/trip-media/${trip.slug}/photos/${prepared.filename}`,
+          path: `/trip-media/${slug}/photos/${prepared.filename}`,
         });
-        if (!poolItems.some((item) => item.path === placed.path)) poolItems.push(placed);
-        uploaded += 1;
-        hashes.set(hash, prepared.filename);
-        rememberMediaHash(trip.slug, prepared.filename, hash);
-        progress.update(index, "done", {
-          note: posterWarning ? "Done. Login poster failed." : "Done",
+        if (prepared.kind === "photo") {
+          const blob = new Blob([prepared.bytes], { type: prepared.contentType });
+          progress.setPreview(index, blob);
+          placed.previewUrl = URL.createObjectURL(blob);
+          if (!poolItems.some((item) => item.path === placed.path)) poolItems.push(placed);
+          renderPool();
+        }
+        progress.update(index, "uploading", { ratio: 0 });
+        try {
+          await uploadToBucket({
+            workerUrl: notesTarget().workerUrl,
+            token: notesTarget().token,
+            objectKey: prepared.objectKey,
+            bytes: prepared.bytes,
+            contentType: prepared.contentType,
+            onProgress: (ratio) => progress.update(index, "uploading", { ratio }),
+          });
+          if (prepared.kind === "photo") {
+            try {
+              const posterBlob = await makePoster(new Blob([prepared.bytes], { type: "image/jpeg" }));
+              await uploadToBucket({
+                workerUrl: notesTarget().workerUrl,
+                token: notesTarget().token,
+                objectKey: posterObjectKey(slug, prepared.filename),
+                bytes: new Uint8Array(await posterBlob.arrayBuffer()),
+                contentType: "image/jpeg",
+              });
+            } catch (error) {
+              posterWarning = error instanceof Error ? error.message : "Could not make the login poster.";
+            }
+            await gate(async () => {
+              if (!trip?.cover) {
+                try {
+                  await persistCover(`/trip-media/${slug}/photos/${prepared.filename}`);
+                } catch {
+                  problems.push("The photo uploaded, but the thumbnail was not saved.");
+                }
+              }
+            });
+          }
+          const remote = gatedMediaUrl(slug, prepared.filename);
+          progress.fillIfBlank(index, remote);
+          fillPoolIfBlank(placed.path, remote);
+          uploaded += 1;
+          rememberMediaHash(slug, prepared.filename, hash);
+          progress.update(index, "done", {
+            note: posterWarning ? "Done. Login poster failed." : "Done",
+          });
+          renderPool();
+        } catch (error) {
+          hashes.delete(hash);
+          pendingHashes.delete(hash);
+          photos.delete(prepared.filename);
+          if (planned) claimed.delete(planned);
+          forgetPoolItem(placed.path);
+          const message = error instanceof Error ? error.message : `Upload of ${file.name} failed.`;
+          problems.push(message);
+          progress.update(index, "failed", { note: message });
+        }
+      });
+      const enqueue = (more: File[], start: number) => {
+        const jobs: { file: File; index: number }[] = [];
+        more.forEach((file, offset) => {
+          const index = start + offset;
+          const planned = plannedMediaFilename(file.name);
+          if (planned && (claimed.has(planned) || mediaDuplicate(planned, "", photos, hashes))) {
+            skipped.push(file.name);
+            progress.update(index, "skipped", { note: skippedNote(file.name) });
+            return;
+          }
+          if (planned) claimed.add(planned);
+          jobs.push({ file, index });
         });
-        renderPool();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : `Upload of ${file.name} failed.`;
-        problems.push(message);
-        progress.update(index, "failed", { note: message });
+        queue.append(jobs);
+      };
+      dispatch = enqueue;
+      buffer.splice(0).forEach((group) => enqueue(group.more, group.start));
+      enqueue(files, 0);
+      for (;;) {
+        await queue.drained();
+        if (!queue.isIdle()) continue;
+        try {
+          await refreshLibrary();
+        } catch {
+          renderPool();
+        }
+        if (queue.isIdle()) break;
       }
-    }
-    try {
-      await refreshLibrary();
-    } catch {
-      renderPool();
-    }
-    const skipNote = skipped.map((name) => skippedNote(name)).join(" ");
-    if (problems.length) {
-      setStatus([problems[0], skipNote].filter(Boolean).join(" "), true);
-    } else if (uploaded) {
-      const noun = uploaded === 1 ? "file" : "files";
-      const poster = posterWarning ? ` Login poster failed: ${posterWarning}` : "";
-      const skippedText = skipNote ? ` ${skipNote}` : "";
-      setStatus(`Uploaded ${uploaded} ${noun}. Open View uploaded media, then drag one onto the day.${poster}${skippedText}`);
-    } else if (skipNote) {
-      setStatus(skipNote);
-    }
+      const skipNote = skipped.map((name) => skippedNote(name)).join(" ");
+      if (problems.length) {
+        setStatus([problems[0], skipNote].filter(Boolean).join(" "), true);
+      } else if (uploaded) {
+        const noun = uploaded === 1 ? "file" : "files";
+        const poster = posterWarning ? ` Login poster failed: ${posterWarning}` : "";
+        const skippedText = skipNote ? ` ${skipNote}` : "";
+        setStatus(`Uploaded ${uploaded} ${noun}. Open View uploaded media, then drag one onto the day.${poster}${skippedText}`);
+      } else if (skipNote) {
+        setStatus(skipNote);
+      }
     } finally {
+      acceptMore = null;
       uploading = false;
     }
   }

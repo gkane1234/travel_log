@@ -164,6 +164,7 @@ function page(title, main, motion) {
     .upload-name { font-family: "Segoe UI", sans-serif; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .upload-note { font-family: "Segoe UI", sans-serif; font-size: 0.75rem; }
     .upload-file[data-phase="failed"] .upload-note { color: #8a2f2f; }
+    .upload-count { margin: 0.15rem 0 0.6rem; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; }
     progress { width: 100%; }
     .file-drop p { margin: 0; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; }
     #lightbox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(28, 36, 30, 0.9); }
@@ -386,6 +387,7 @@ function tripViewer(slug) {
   const drop = document.getElementById("gallery-drop");
   const status = document.getElementById("gallery-status");
   let busy = false;
+  let acceptMore = null;
   function say(message) { if (status) status.textContent = message; }
   function names() {
     const found = new Set();
@@ -439,36 +441,93 @@ function tripViewer(slug) {
   }
   function showUpload(files) {
     const list = document.getElementById("gallery-progress");
-    if (!list) return { update() {} };
+    if (!list) return { update() {}, addFiles() { return 0; } };
+    const previous = list.nextElementSibling;
+    if (previous && previous.classList.contains("upload-count")) previous.remove();
     list.querySelectorAll("img, video").forEach((node) => {
       const src = node.getAttribute("src") || "";
       if (src.indexOf("blob:") === 0) URL.revokeObjectURL(src);
     });
     list.replaceChildren();
-    list.hidden = false;
-    const rows = files.map((file) => {
+    const count = document.createElement("p");
+    count.className = "upload-count meta";
+    list.insertAdjacentElement("afterend", count);
+    const batch = files.slice();
+    const rows = [];
+    const settled = new Set();
+    let finished = 0;
+    let failures = 0;
+    function lowerName(file) {
+      return String(file && file.name || "").toLowerCase();
+    }
+    function heicFile(file) {
+      const type = file && file.type || "";
+      const name = lowerName(file);
+      return name.endsWith(".heic") || name.endsWith(".heif") || type === "image/heic" || type === "image/heif";
+    }
+    function videoFile(file) {
+      const type = file && file.type || "";
+      const name = lowerName(file);
+      return type.indexOf("video/") === 0 || name.endsWith(".mp4") || name.endsWith(".m4v") || name.endsWith(".webm") || name.endsWith(".mov");
+    }
+    function revokeRow(row) {
+      row.querySelectorAll("img, video").forEach((node) => {
+        const src = node.getAttribute("src") || "";
+        if (src.indexOf("blob:") === 0) URL.revokeObjectURL(src);
+      });
+    }
+    function paintCount() {
+      const active = rows.some((row) => row && row.dataset.phase !== "failed");
+      const failed = rows.some((row) => row && row.dataset.phase === "failed");
+      if (settled.size === batch.length) {
+        count.hidden = true;
+        count.textContent = "";
+        if (!failures) {
+          rows.forEach((row) => { if (row) revokeRow(row); });
+          list.replaceChildren();
+          list.hidden = true;
+        } else {
+          list.hidden = !failed;
+        }
+        return;
+      }
+      count.hidden = false;
+      count.textContent = finished + "/" + batch.length;
+      list.hidden = !active && !failed;
+    }
+    function ensureRow(index) {
+      if (rows[index]) return rows[index];
+      const file = batch[index];
+      if (!file) return null;
       const row = document.createElement("li");
       row.className = "upload-file";
       const preview = document.createElement("span");
       preview.className = "upload-preview";
-      const url = URL.createObjectURL(file);
-      const video = (file.type || "").indexOf("video/") === 0 || /\\.(mp4|m4v|webm|mov)$/i.test(file.name);
-      if (String(url).indexOf("blob:") === 0 && video) {
-        const node = document.createElement("video");
-        node.src = url;
-        node.muted = true;
-        node.playsInline = true;
-        node.preload = "metadata";
-        node.width = 96;
-        node.height = 72;
-        preview.append(node);
-      } else if (String(url).indexOf("blob:") === 0) {
-        const node = document.createElement("img");
-        node.src = url;
-        node.alt = "";
-        node.width = 96;
-        node.height = 72;
-        preview.append(node);
+      if (videoFile(file)) {
+        const url = URL.createObjectURL(file);
+        if (String(url).indexOf("blob:") === 0) {
+          const node = document.createElement("video");
+          node.src = url;
+          node.muted = true;
+          node.playsInline = true;
+          node.preload = "metadata";
+          node.width = 96;
+          node.height = 72;
+          node.addEventListener("loadeddata", () => {
+            try { if (node.currentTime < 0.01) node.currentTime = 0.1; } catch (error) { /* keep the tile */ }
+          });
+          preview.append(node);
+        }
+      } else if (!heicFile(file)) {
+        const url = URL.createObjectURL(file);
+        if (String(url).indexOf("blob:") === 0) {
+          const node = document.createElement("img");
+          node.src = url;
+          node.alt = "";
+          node.width = 96;
+          node.height = 72;
+          preview.append(node);
+        }
       }
       const body = document.createElement("span");
       body.className = "upload-body";
@@ -480,47 +539,117 @@ function tripViewer(slug) {
       bar.value = 0;
       const note = document.createElement("span");
       note.className = "upload-note";
-      note.textContent = "Queued";
       body.append(name, bar, note);
       row.append(preview, body);
+      rows[index] = row;
       list.append(row);
+      list.hidden = false;
       return row;
-    });
-    return {
-      update(index, phase, ratio, message) {
-        const row = rows[index];
-        if (!row) return;
-        row.dataset.phase = phase;
-        const bar = row.querySelector("progress");
-        const note = row.querySelector(".upload-note");
-        if (phase === "skipped") {
+    }
+    function setPreview(index, source) {
+      if (settled.has(index)) return;
+      const row = ensureRow(index);
+      const preview = row && row.querySelector(".upload-preview");
+      if (!row || !preview) return;
+      const previous = preview.querySelector("img");
+      if (previous) {
+        const owned = previous.getAttribute("src") || "";
+        if (owned.indexOf("blob:") === 0) URL.revokeObjectURL(owned);
+        previous.remove();
+      }
+      let url = "";
+      if (source instanceof Blob) url = URL.createObjectURL(source);
+      else if (typeof source === "string") url = source;
+      if (!url || url.indexOf("file:") === 0) return;
+      const img = document.createElement("img");
+      img.alt = "";
+      img.width = 96;
+      img.height = 72;
+      img.dataset.painted = "0";
+      img.addEventListener("load", () => { img.dataset.painted = "1"; });
+      img.src = url;
+      preview.append(img);
+    }
+    function fillIfBlank(index, url) {
+      const row = rows[index];
+      if (!row || !url || settled.has(index)) return;
+      const img = row.querySelector(".upload-preview img");
+      if (img && (img.dataset.painted === "1" || (img.complete && img.naturalWidth > 0))) return;
+      if (!img || !img.getAttribute("src") || (img.complete && img.naturalWidth === 0)) {
+        setPreview(index, url);
+        return;
+      }
+      img.addEventListener("error", () => {
+        if (img.dataset.painted !== "1") setPreview(index, url);
+      }, { once: true });
+    }
+    function settle(index, phase, message) {
+      if (settled.has(index)) return;
+      settled.add(index);
+      if (phase === "failed") {
+        failures += 1;
+        const row = ensureRow(index);
+        if (row) {
+          row.dataset.phase = "failed";
+          const bar = row.querySelector("progress");
+          const note = row.querySelector(".upload-note");
           if (bar) bar.hidden = true;
-          if (note) note.textContent = message || "Skipped because it is already there.";
+          if (note) note.textContent = message || "Failed";
+        }
+      } else {
+        finished += 1;
+        const row = rows[index];
+        if (row) {
+          revokeRow(row);
+          row.remove();
+          rows[index] = null;
+        }
+      }
+      paintCount();
+    }
+    paintCount();
+    return {
+      addFiles(more) {
+        const start = batch.length;
+        more.forEach((file) => {
+          batch.push(file);
+          rows.push(null);
+        });
+        paintCount();
+        return start;
+      },
+      update(index, phase, ratio, message, preview) {
+        if (settled.has(index)) return;
+        if (phase === "queued") return;
+        if (phase === "preview") {
+          if (preview) setPreview(index, preview);
+          return;
+        }
+        if (phase === "remote") {
+          if (message) fillIfBlank(index, message);
+          return;
+        }
+        if (phase === "done" || phase === "skipped") {
+          settle(index, phase, message);
           return;
         }
         if (phase === "failed") {
-          if (bar) { bar.hidden = false; bar.value = 0; }
-          if (note) note.textContent = message || "Failed";
+          settle(index, "failed", message);
           return;
         }
+        const row = ensureRow(index);
+        if (!row || settled.has(index)) return;
+        row.dataset.phase = phase;
+        const bar = row.querySelector("progress");
+        const note = row.querySelector(".upload-note");
         if (bar) bar.hidden = false;
-        if (phase === "done") {
-          if (bar) bar.value = 1;
-          if (note) note.textContent = message || "Done";
-          return;
-        }
         if (phase === "uploading") {
           if (bar && typeof ratio === "number") bar.value = ratio;
           if (note) note.textContent = "Uploading";
           return;
         }
-        if (phase === "preparing") {
-          if (bar) bar.removeAttribute("value");
-          if (note) note.textContent = "Preparing";
-          return;
-        }
-        if (bar) bar.value = 0;
-        if (note) note.textContent = "Queued";
+        if (bar) bar.removeAttribute("value");
+        if (note) note.textContent = "Preparing";
       },
     };
   }
@@ -559,12 +688,26 @@ function tripViewer(slug) {
     return found;
   }
   async function send(files) {
-    if (!files.length || busy) return;
+    if (!files.length) return;
+    if (acceptMore) {
+      acceptMore(files);
+      return;
+    }
     busy = true;
     const rows = showUpload(files);
+    const extra = [];
+    let enqueue = null;
+    acceptMore = (more) => {
+      rows.addFiles(more);
+      if (enqueue) enqueue(more);
+      else extra.push(more);
+    };
     try {
       const upload = await uploader();
-      const result = await upload(slug, files, names(), say, rows.update);
+      const result = await upload(slug, files, names(), say, rows.update, (append) => {
+        enqueue = append;
+        extra.splice(0).forEach((group) => append(group));
+      });
       result.added.forEach(tile);
       const skipped = result.skipped || [];
       const skipNote = skipped.map((name) => "Skipped " + name + " because it is already there.").join(" ");
@@ -576,6 +719,7 @@ function tripViewer(slug) {
     } catch (error) {
       say(error && error.message ? error.message : "Could not add those files.");
     } finally {
+      acceptMore = null;
       busy = false;
     }
   }

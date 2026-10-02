@@ -1,6 +1,7 @@
 import { plannedMediaFilename, prepareDroppedFile } from "./media.ts";
 import { hashesForMedia, mediaDuplicate, rememberMediaHash, sha256Hex, skippedNote } from "./duplicates.ts";
 import { makePoster, posterObjectKey } from "./poster.ts";
+import { createGate, createUploadQueue } from "./upload-pool.ts";
 import { uploadToBucket } from "./upload.ts";
 
 export type GalleryUpload = {
@@ -16,70 +17,93 @@ export type GalleryUploadResult = {
   skipped: string[];
 };
 
-/** Upload photos and videos into a trip gallery. Day notes are left unchanged. */
+type FileNotice = (
+  index: number,
+  phase: "queued" | "preparing" | "uploading" | "done" | "skipped" | "failed" | "preview" | "remote",
+  ratio?: number,
+  note?: string,
+  preview?: Blob | string,
+) => void;
+
+/** Upload photos and videos into a trip gallery. Later calls while one batch is running append to it. */
 export async function uploadGalleryFiles(
   slug: string,
   files: File[],
   existing: Set<string>,
   onStatus: (message: string) => void,
-  onFile?: (index: number, phase: "queued" | "preparing" | "uploading" | "done" | "skipped" | "failed", ratio?: number, note?: string) => void,
+  onFile?: FileNotice,
+  onReady?: (append: (more: File[]) => void) => void,
 ): Promise<GalleryUploadResult> {
   const added: GalleryUpload[] = [];
   const problems: string[] = [];
   const skipped: string[] = [];
   const routes = new Set<string>();
+  const claimed = new Set<string>();
+  const pendingHashes = new Set<string>();
+  const gate = createGate();
+  const buffered: File[][] = [];
+  let nextIndex = 0;
+  let ingest = (batch: File[]) => {
+    buffered.push(batch);
+  };
+  ingest(files);
+  onReady?.((batch) => ingest(batch));
   onStatus("Checking files already on this trip…");
-  files.forEach((_, index) => onFile?.(index, "queued"));
   let hashes;
   try {
     hashes = await hashesForMedia(slug, existing);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not check files already on this trip.";
-    files.forEach((_, index) => onFile?.(index, "failed", undefined, message));
+    buffered.flat().forEach((file, index) => onFile?.(index, "failed", undefined, message));
     return { added, error: message, skipped };
   }
-  for (let index = 0; index < files.length; index += 1) {
-    const file = files[index];
+  const queue = createUploadQueue(async (job: { file: File; index: number }) => {
+    const { file, index } = job;
     const planned = plannedMediaFilename(file.name);
-    if (planned && mediaDuplicate(planned, "", existing, hashes)) {
-      skipped.push(file.name);
-      onFile?.(index, "skipped", undefined, skippedNote(file.name));
-      onStatus(skippedNote(file.name));
-      continue;
-    }
     onFile?.(index, "preparing");
-    onStatus(`Preparing ${index + 1} of ${files.length}: ${file.name}`);
     let prepared;
     try {
       prepared = await prepareDroppedFile(file, slug, existing, routes);
     } catch (error) {
+      if (planned) claimed.delete(planned);
       const message = error instanceof Error ? error.message : `Could not add ${file.name}.`;
       problems.push(message);
       onFile?.(index, "failed", undefined, message);
-      continue;
+      return;
     }
     if (prepared.kind !== "photo" && prepared.kind !== "video") {
+      if (planned) claimed.delete(planned);
       const message = `${file.name} is not a photo or video.`;
       problems.push(message);
       onFile?.(index, "failed", undefined, message);
-      continue;
+      return;
     }
     if (!prepared.objectKey || !prepared.contentType) {
+      if (planned) claimed.delete(planned);
       const message = `Could not prepare ${file.name}.`;
       problems.push(message);
       onFile?.(index, "failed", undefined, message);
-      continue;
+      return;
     }
     const hash = await sha256Hex(prepared.bytes);
-    if (mediaDuplicate("", hash, existing, hashes)) {
-      existing.delete(prepared.filename);
+    const duplicate = await gate(() => {
+      if (mediaDuplicate("", hash, existing, hashes) || pendingHashes.has(hash)) {
+        existing.delete(prepared.filename);
+        return true;
+      }
+      pendingHashes.add(hash);
+      hashes.set(hash, prepared.filename);
+      return false;
+    });
+    if (duplicate) {
       skipped.push(file.name);
       onFile?.(index, "skipped", undefined, skippedNote(file.name));
-      onStatus(skippedNote(file.name));
-      continue;
+      return;
+    }
+    if (prepared.kind === "photo") {
+      onFile?.(index, "preview", undefined, undefined, new Blob([prepared.bytes], { type: prepared.contentType }));
     }
     onFile?.(index, "uploading", 0);
-    onStatus(`Uploading ${index + 1} of ${files.length}: ${prepared.filename}`);
     try {
       await uploadToBucket({
         workerUrl: location.origin,
@@ -90,10 +114,14 @@ export async function uploadGalleryFiles(
         onProgress: (ratio) => onFile?.(index, "uploading", ratio),
       });
     } catch (error) {
+      hashes.delete(hash);
+      pendingHashes.delete(hash);
+      existing.delete(prepared.filename);
+      if (planned) claimed.delete(planned);
       const message = error instanceof Error ? error.message : `Upload of ${file.name} failed.`;
       problems.push(message);
       onFile?.(index, "failed", undefined, message);
-      continue;
+      return;
     }
     let posterFailed = false;
     if (prepared.kind === "photo") {
@@ -116,9 +144,32 @@ export async function uploadGalleryFiles(
       filename: prepared.filename,
       posterFailed,
     });
-    hashes.set(hash, prepared.filename);
     rememberMediaHash(slug, prepared.filename, hash);
+    onFile?.(index, "remote", undefined, `/travel-log/media/${slug}/photos/${prepared.filename}`);
     onFile?.(index, "done", 1, posterFailed ? "Done. Login poster failed." : "Done");
+  });
+  const take = (batch: File[]) => {
+    const jobs: { file: File; index: number }[] = [];
+    for (const file of batch) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const planned = plannedMediaFilename(file.name);
+      if (planned && (claimed.has(planned) || mediaDuplicate(planned, "", existing, hashes))) {
+        skipped.push(file.name);
+        onFile?.(index, "skipped", undefined, skippedNote(file.name));
+        continue;
+      }
+      if (planned) claimed.add(planned);
+      jobs.push({ file, index });
+    }
+    queue.append(jobs);
+  };
+  ingest = take;
+  const waiting = buffered.splice(0);
+  waiting.forEach((batch) => take(batch));
+  for (;;) {
+    await queue.drained();
+    if (queue.isIdle()) break;
   }
   return { added, error: problems[0] || "", skipped };
 }

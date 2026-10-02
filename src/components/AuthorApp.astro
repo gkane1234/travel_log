@@ -397,6 +397,22 @@ const { slug = "" } = Astro.props;
   #added-photos[hidden] {
     display: none;
   }
+  #added-photos:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    height: calc(18 * 1.5 * 16px + 1.8rem);
+    max-height: calc(18 * 1.5 * 16px + 1.8rem);
+    overflow: hidden;
+  }
+  #added-photos #media-pool {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    align-content: start;
+  }
+  .upload-count {
+    margin: 0.2rem 0 0.6rem;
+  }
   .file-drop {
     display: grid;
     gap: 0.55rem;

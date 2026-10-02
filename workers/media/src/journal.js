@@ -124,15 +124,20 @@ function page(title, main, motion) {
     .name-card span { display: grid; line-height: 1.2; }
     .name-card em { font-style: normal; font-size: 0.75rem; opacity: 0.8; }
     .float-photo { position: absolute; height: auto; margin: 0; border-radius: 8px; box-shadow: 0 8px 24px rgba(28, 36, 30, 0.18); }
-    #motion-debug { position: fixed; right: 0.8rem; bottom: 0.8rem; z-index: 5; width: min(18rem, calc(100% - 1.6rem)); padding: 0.7rem 0.8rem; background: rgba(28, 36, 30, 0.92); color: #f3efe6; font-family: "Segoe UI", sans-serif; font-size: 0.82rem; border-radius: 8px; }
-    #motion-debug .debug-bar { display: flex; justify-content: space-between; align-items: center; }
-    #motion-debug button { font: inherit; background: transparent; color: inherit; border: 0; cursor: pointer; }
-    #motion-form { display: grid; gap: 0.35rem; margin-top: 0.45rem; }
+    #motion-toggle { position: fixed; right: 0.8rem; bottom: 0.8rem; z-index: 6; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; padding: 0.45rem 0.75rem; border: 0; border-radius: 999px; background: #2e4a3e; color: #f3efe6; cursor: pointer; }
+    #motion-debug { position: fixed; right: 0.8rem; bottom: 3.4rem; z-index: 6; width: min(18rem, calc(100% - 1.6rem)); padding: 0.7rem 0.8rem; background: rgba(28, 36, 30, 0.92); color: #f3efe6; font-family: "Segoe UI", sans-serif; font-size: 0.82rem; border-radius: 8px; }
+    #motion-debug[hidden] { display: none !important; }
+    #motion-form { display: grid; gap: 0.35rem; }
     #motion-form label { display: grid; gap: 0.1rem; }
     #motion-form input { font: inherit; width: 100%; }
     #motion-debug .debug-note { margin: 0.45rem 0 0; opacity: 0.8; }
     header, main { position: relative; z-index: 1; max-width: 42rem; margin: 0 auto; padding: 1.25rem; }
     main { background: rgba(243, 239, 230, 0.88); }
+    main:has(#log-panel) { background: transparent; }
+    .log-menu { position: relative; display: inline-block; }
+    #log-toggle { font-family: "Segoe UI", sans-serif; font-size: 1rem; padding: 0.45rem 0.8rem; border: 1px solid #2e4a3e; border-radius: 999px; background: rgba(243, 239, 230, 0.92); color: #1c241e; cursor: pointer; }
+    #log-panel { position: absolute; top: calc(100% + 0.45rem); left: 0; width: min(36rem, calc(100vw - 2.5rem)); max-height: min(70vh, 34rem); overflow: auto; padding: 0.4rem 1rem 1rem; background: rgba(243, 239, 230, 0.94); border-radius: 10px; box-shadow: 0 10px 28px rgba(28, 36, 30, 0.16); }
+    #log-panel[hidden] { display: none !important; }
     header { display: flex; justify-content: space-between; align-items: baseline; }
     h1, h2 { font-weight: 600; letter-spacing: -0.02em; }
     .meta { color: #5c675f; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
@@ -842,7 +847,28 @@ export async function renderJournal(bucket, url) {
     const motion = motionModel(await tripCatalog(bucket));
     return page(
       "Travel Log",
-      `<h1>Travel Log</h1><h2>Trips</h2>${listMarkup(trips)}<h2>Day trips</h2>${listMarkup(outings)}`,
+      `<h1>Travel Log</h1><div class="log-menu"><button type="button" id="log-toggle" aria-expanded="false" aria-controls="log-panel">Travel log</button><div id="log-panel" hidden><h2>Trips</h2>${listMarkup(trips)}<h2>Day trips</h2>${listMarkup(outings)}</div></div><script>
+(() => {
+  const button = document.getElementById("log-toggle");
+  const panel = document.getElementById("log-panel");
+  if (!button || !panel) return;
+  function setOpen(open) {
+    if (open) panel.removeAttribute("hidden");
+    else panel.setAttribute("hidden", "");
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setOpen(panel.hasAttribute("hidden"));
+  });
+  document.addEventListener("click", (event) => {
+    if (panel.hasAttribute("hidden")) return;
+    const target = event.target;
+    if (target && (panel.contains(target) || button.contains(target))) return;
+    setOpen(false);
+  });
+})();
+</script>`,
       motion,
     );
   }

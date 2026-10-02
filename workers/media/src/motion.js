@@ -84,8 +84,8 @@ export function motionMarkup(model) {
   const payload = JSON.stringify(model).replace(/</g, "\\u003c");
   const chrome = `<div id="motion-names" aria-hidden="true"></div>
 <div id="motion-layer" aria-hidden="true"></div>
-<aside id="motion-debug">
-  <div class="debug-bar"><strong>Motion</strong><button type="button" id="motion-toggle">Hide</button></div>
+<button type="button" id="motion-toggle" aria-expanded="false" aria-controls="motion-debug">Motion</button>
+<aside id="motion-debug" hidden>
   <form id="motion-form">
     ${field("peakOpacity", "Peak opacity", 0.05, 1, 0.05)}
     ${field("travelPercent", "Travel distance (% of screen)", 1, 80, 1)}
@@ -135,10 +135,12 @@ export function motionMarkup(model) {
       if (input.name === "nameCards" || input.name === "nameSpeed") syncCards();
     });
   }
-  toggle.addEventListener("click", () => {
-    const hidden = form.hidden;
-    form.hidden = !hidden;
-    toggle.textContent = hidden ? "Hide" : "Motion";
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = panel.hasAttribute("hidden");
+    if (open) panel.removeAttribute("hidden");
+    else panel.setAttribute("hidden", "");
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
   });
 
   function read() {
@@ -293,7 +295,6 @@ export function motionMarkup(model) {
   if (!document.querySelector(".trip-list")) return;
   syncCards();
   requestAnimationFrame(tick);
-  panel.hidden = false;
 })();
 </script>`;
   return { chrome, script };

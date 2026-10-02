@@ -1138,7 +1138,10 @@ export function mountAuthor(root: HTMLElement): void {
   });
 
   publishBtn.addEventListener("click", async () => {
-    if (!trip) return;
+    if (!trip) {
+      setStatus("Open a trip before changing whether it is on the public site.", true);
+      return;
+    }
     setStatus("Saving…");
     try {
       const raw = await readNote(trip.indexPath);

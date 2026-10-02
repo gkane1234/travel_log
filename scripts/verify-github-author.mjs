@@ -16,13 +16,15 @@ import {
   photoPathsInMarkdown,
   routeRepoPath,
 } from "../src/lib/github/commit-plan.ts";
-import { convertHeicFile } from "../src/lib/github/media.ts";
+import { convertHeicFile, plannedMediaFilename } from "../src/lib/github/media.ts";
 import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
 import { POSTER_MAX_BYTES, isPosterKey, mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
 import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
 import { checkLogin, loginPage, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
 import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
 import { posterStage } from "../workers/media/src/motion.js";
+import { uploadGalleryFiles } from "../src/lib/github/gallery-client.ts";
+import { mediaDuplicate, sha256Hex, skippedNote } from "../src/lib/github/duplicates.ts";
 import { dateRangeRefusal, dayNotesOutsideRange } from "../src/lib/github/trip-details.ts";
 import { putTripNotes, tripNoteKey } from "../workers/media/src/notes.js";
 import sharp from "sharp";
@@ -285,11 +287,21 @@ const dayAt = tripHtml.indexOf('class="day"');
 assert.ok(galleryAt !== -1 && dayAt !== -1 && galleryAt < dayAt);
 assert.match(tripHtml, /class="gallery-item" data-kind="photo" data-src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
 assert.match(tripHtml, /class="gallery-item" data-kind="video" data-src="\/travel-log\/media\/olympic-peninsula\/photos\/clip\.mp4"/);
+assert.match(tripHtml, /class="note-media" data-kind="photo" data-src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
+assert.match(tripHtml, /href="\/travel-log\/author\/\?trip=olympic-peninsula"/);
+assert.match(tripHtml, /id="gallery-add"[^>]*multiple/);
+assert.match(tripHtml, /id="gallery-drop"/);
+assert.match(tripHtml, /Drop photos and videos here/);
+assert.match(tripHtml, /id="lightbox-close"/);
+assert.match(tripHtml, /closest\("\.gallery-item, \.note-media"\)/);
+assert.match(tripHtml, /event\.target === box \|\| event\.target === frame/);
+assert.match(tripHtml, /travelLogUploadGallery/);
 assert.equal(tripHtml.includes("shore.gpx"), false);
 assert.equal(tripHtml.includes("shoreline.gpx"), false);
 assert.match(tripHtml, /id="lightbox"/);
 assert.equal(tripHtml.includes('id="motion-layer"'), false);
 assert.equal(tripHtml.includes('id="motion-debug"'), false);
+assert.equal(homeHtml.includes('id="gallery-add"'), false);
 
 files.set(
   "trips/olympic-peninsula/index.md",
@@ -330,7 +342,9 @@ assert.match(await coastHome.text(), /Coast Walk/);
 const coastPage = await renderJournal(writable, new URL("https://gabriel-kane.com/travel-log/trips/coast"));
 const coastHtml = await coastPage.text();
 assert.match(coastHtml, /Saw a heron/);
-assert.equal(coastHtml.includes('class="gallery"'), false);
+assert.match(coastHtml, /id="gallery-add"/);
+assert.match(coastHtml, /href="\/travel-log\/author\/\?trip=coast"/);
+assert.equal(coastHtml.includes('class="gallery-item"'), false);
 assert.equal(coastHtml.includes('id="motion-layer"'), false);
 
 assert.equal(isPosterKey("posters/olympic-peninsula/img-5123-2.jpg"), true);
@@ -379,6 +393,26 @@ assert.deepEqual(
 const authorMarkup = readFileSync(new URL("../src/components/AuthorApp.astro", import.meta.url), "utf8");
 assert.match(authorMarkup, /id="media-input"[^>]*multiple/);
 assert.match(authorMarkup, /id="create-media"[^>]*multiple/);
+assert.match(authorMarkup, /id="add-photos-toggle"/);
+assert.match(authorMarkup, />Add photos</);
+assert.match(authorMarkup, /id="add-photos-panel" hidden/);
+assert.match(authorMarkup, /id="add-drop"/);
+assert.match(authorMarkup, /Drop photos and videos here/);
+assert.match(authorMarkup, /Choose photos and videos/);
+assert.match(authorMarkup, /id="cover-toggle"/);
+assert.match(authorMarkup, /Change thumbnail/);
+assert.match(authorMarkup, /id="cover-panel" hidden/);
+assert.match(authorMarkup, /id="added-photos-toggle"/);
+assert.match(authorMarkup, />Added photos</);
+assert.match(authorMarkup, /id="added-photos" hidden/);
+assert.match(authorMarkup, /id="photo-preview" hidden/);
+assert.match(authorMarkup, /id="publish-trip"/);
+assert.match(authorMarkup, /Hide from the public site/);
+const publishAt = authorMarkup.indexOf('id="publish-trip"');
+const addedAt = authorMarkup.indexOf('id="added-photos-toggle"');
+const addPhotosAt = authorMarkup.indexOf('id="add-photos-toggle"');
+const coverAt = authorMarkup.indexOf('id="cover-toggle"');
+assert.ok(coverAt !== -1 && addPhotosAt > coverAt && addedAt > addPhotosAt && publishAt > addedAt);
 assert.match(authorMarkup, /name="kind" value="trip"/);
 assert.match(authorMarkup, /name="kind" value="outing"/);
 assert.match(authorMarkup, /Day trip/);
@@ -400,7 +434,33 @@ assert.match(authorUi, /kind: kind \|\| undefined/);
 assert.match(authorUi, /dayNotesOutsideRange/);
 assert.match(authorUi, /dateRangeRefusal/);
 assert.match(authorUi, /path: trip\.indexPath/);
-assert.equal(authorUi.includes("indexRepoPath(slugify("), false);
+assert.match(authorUi, /setAddOpen\(false\)/);
+assert.match(authorUi, /bindFileDrop\(addDrop/);
+assert.match(authorUi, /dblclick/);
+assert.match(authorUi, /openPhotoPreview/);
+assert.match(authorUi, /classList\.toggle\("is-danger", !trip\.draft\)/);
+assert.equal(authorUi.includes('bodyEl.addEventListener("click"'), false);
+assert.equal(typeof uploadGalleryFiles, "function");
+assert.equal(plannedMediaFilename("Clip.MP4"), "clip.mp4");
+assert.equal(plannedMediaFilename("Photo.JPEG"), "photo.jpg");
+assert.equal(plannedMediaFilename("Walk.mov"), "walk.mov");
+const names = new Set(["clip.mp4", "shore.jpg"]);
+const hashes = new Map([
+  ["abc", "shore.jpg"],
+  ["vid", "clip.mp4"],
+]);
+assert.equal(mediaDuplicate("clip.mp4", "different", names, hashes), true);
+assert.equal(mediaDuplicate("other.mp4", "vid", names, hashes), true);
+assert.equal(mediaDuplicate("shore.jpg", "fresh", names, hashes), true);
+assert.equal(mediaDuplicate("other.mp4", "fresh", names, hashes), false);
+assert.equal(mediaDuplicate("second.jpg", "abc", names, hashes), true);
+assert.equal(skippedNote("clip.mp4"), "Skipped clip.mp4 because it is already there.");
+assert.equal(skippedNote("shore.jpg"), "Skipped shore.jpg because it is already there.");
+const sameVideo = await sha256Hex(new TextEncoder().encode("same-video-bytes"));
+const otherVideo = await sha256Hex(new TextEncoder().encode("other-video-bytes"));
+assert.notEqual(sameVideo, otherVideo);
+assert.equal(mediaDuplicate("new.mp4", sameVideo, new Set(), new Map([[sameVideo, "clip.mp4"]])), true);
+assert.equal(mediaDuplicate("new.mp4", otherVideo, new Set(), new Map([[sameVideo, "clip.mp4"]])), false);
 
 const kept = [
   { date: "2026-09-05", text: "Ferry at dawn.\n" },

@@ -12,7 +12,8 @@ import {
 } from "./commit-plan.ts";
 import { addDays, slugify } from "./dates.ts";
 import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip } from "./frontmatter.ts";
-import { prepareDroppedFile } from "./media.ts";
+import { plannedMediaFilename, prepareDroppedFile } from "./media.ts";
+import { hashesForMedia, mediaDuplicate, rememberMediaHash, sha256Hex, skippedNote } from "./duplicates.ts";
 import { makePoster, posterObjectKey } from "./poster.ts";
 import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
 import { dateRangeRefusal, dayNotesOutsideRange, type DayNote } from "./trip-details.ts";
@@ -90,13 +91,27 @@ export function mountAuthor(root: HTMLElement): void {
   const detailsEnd = must<HTMLInputElement>(root, "details-end");
   const detailsError = must<HTMLElement>(root, "details-error");
   const coverChoices = must<HTMLElement>(root, "cover-choices");
+  const coverPanel = must<HTMLElement>(root, "cover-panel");
+  const coverToggle = must<HTMLButtonElement>(root, "cover-toggle");
+  const coverClose = must<HTMLButtonElement>(root, "cover-close");
+  const coverSummary = must<HTMLElement>(root, "cover-summary");
   const saveCoverBtn = must<HTMLButtonElement>(root, "save-cover");
+  const addPhotosToggle = must<HTMLButtonElement>(root, "add-photos-toggle");
+  const addPhotosPanel = must<HTMLElement>(root, "add-photos-panel");
+  const addPhotosClose = must<HTMLButtonElement>(root, "add-photos-close");
+  const addDrop = must<HTMLElement>(root, "add-drop");
+  const addedPhotosToggle = must<HTMLButtonElement>(root, "added-photos-toggle");
+  const addedPhotos = must<HTMLElement>(root, "added-photos");
+  const addedPhotosClose = must<HTMLButtonElement>(root, "added-photos-close");
+  const photoPreview = must<HTMLElement>(root, "photo-preview");
+  const photoPreviewClose = must<HTMLButtonElement>(root, "photo-preview-close");
+  const photoPreviewFrame = must<HTMLElement>(root, "photo-preview-frame");
+  const createDrop = must<HTMLElement>(root, "create-drop");
   const mediaPool = must<HTMLElement>(root, "media-pool");
   const poolHint = must<HTMLElement>(root, "pool-hint");
   const createMedia = must<HTMLInputElement>(root, "create-media");
   let selectedCover = "";
   let poolItems: PoolItem[] = [];
-  let selectedPath = "";
 
   function show(name: keyof typeof screens): void {
     for (const [key, el] of Object.entries(screens)) {
@@ -207,7 +222,68 @@ export function mountAuthor(root: HTMLElement): void {
       .join(" · ");
     viewLink.href = `${base}trips/${trip.slug}/`;
     publishBtn.textContent = trip.draft ? "Show on the public site" : "Hide from the public site";
+    publishBtn.classList.toggle("is-danger", !trip.draft);
     selectedCover = trip.cover || "";
+    renderCoverSummary();
+  }
+
+  function renderCoverSummary(): void {
+    coverSummary.replaceChildren();
+    if (!selectedCover) {
+      coverSummary.textContent = "First photo in the trip";
+      return;
+    }
+    const src = coverMediaUrl(selectedCover);
+    if (src) {
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = "";
+      coverSummary.append(img);
+    }
+    const name = document.createElement("span");
+    name.textContent = selectedCover.split("/").pop() || selectedCover;
+    coverSummary.append(name);
+  }
+
+  function setCoverOpen(open: boolean): void {
+    coverPanel.hidden = !open;
+    coverToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function setAddOpen(open: boolean): void {
+    addPhotosPanel.hidden = !open;
+    addPhotosToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function closePhotoPreview(): void {
+    photoPreview.hidden = true;
+    photoPreviewFrame.replaceChildren();
+  }
+
+  function setAddedOpen(open: boolean): void {
+    addedPhotos.hidden = !open;
+    addedPhotosToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!open) closePhotoPreview();
+  }
+
+  function openPhotoPreview(item: PoolItem): void {
+    if (!trip) return;
+    photoPreviewFrame.replaceChildren();
+    const src = gatedMediaUrl(trip.slug, item.filename);
+    if (item.kind === "video") {
+      const video = document.createElement("video");
+      video.controls = true;
+      video.playsInline = true;
+      video.autoplay = true;
+      video.src = src;
+      photoPreviewFrame.append(video);
+    } else if (src) {
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = item.filename;
+      photoPreviewFrame.append(img);
+    }
+    photoPreview.hidden = false;
   }
 
   function fillDetailsForm(): void {
@@ -263,6 +339,7 @@ export function mountAuthor(root: HTMLElement): void {
       button.classList.toggle("is-selected", on);
       button.setAttribute("aria-pressed", on ? "true" : "false");
     });
+    renderCoverSummary();
   }
 
   function coverTile(coverPath: string, label: string): HTMLButtonElement {
@@ -315,9 +392,7 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   function renderPool(): void {
-    poolHint.textContent = selectedPath
-      ? "Click in the day where this should go, or drag it into the note."
-      : "Add many at once. Click a photo or video, then click in the day where it should go. Or drag it into the note.";
+    poolHint.textContent = "Drag a thumbnail onto the day note. Double-click to see it full size.";
     mediaPool.replaceChildren();
     if (!trip || !poolItems.length) {
       const empty = document.createElement("p");
@@ -332,9 +407,6 @@ export function mountAuthor(root: HTMLElement): void {
       button.className = "cover-choice";
       button.draggable = true;
       button.dataset.path = item.path;
-      const selected = item.path === selectedPath;
-      button.classList.toggle("is-selected", selected);
-      button.setAttribute("aria-pressed", selected ? "true" : "false");
       const src = gatedMediaUrl(trip.slug, item.filename);
       if (item.kind === "video") {
         const video = document.createElement("video");
@@ -357,12 +429,9 @@ export function mountAuthor(root: HTMLElement): void {
         img.alt = item.filename;
         button.append(img);
       }
-      const name = document.createElement("span");
-      name.textContent = item.filename;
-      button.append(name);
-      button.addEventListener("click", () => {
-        selectedPath = selectedPath === item.path ? "" : item.path;
-        renderPool();
+      button.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        openPhotoPreview(item);
       });
       button.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("application/x-travel-log", item.markdown);
@@ -433,7 +502,9 @@ export function mountAuthor(root: HTMLElement): void {
   async function openTrip(slug: string, date?: string): Promise<void> {
     show("editor");
     poolItems = [];
-    selectedPath = "";
+    setCoverOpen(false);
+    setAddOpen(false);
+    setAddedOpen(false);
     renderPool();
     setStatus("Loading…");
     try {
@@ -535,7 +606,6 @@ export function mountAuthor(root: HTMLElement): void {
       bodyEl.setSelectionRange(pos, pos);
     }
     insertAtCursor(bodyEl, markdown);
-    selectedPath = "";
     dirty = true;
     renderPool();
     setStatus("Placed in this day. Save day to keep it.");
@@ -568,8 +638,17 @@ export function mountAuthor(root: HTMLElement): void {
     let posterWarning = "";
     let uploaded = 0;
     const problems: string[] = [];
+    const skipped: string[] = [];
+    setStatus("Checking files already on this trip…");
+    const hashes = await hashesForMedia(trip.slug, photos);
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
+      const planned = plannedMediaFilename(file.name);
+      if (planned && mediaDuplicate(planned, "", photos, hashes)) {
+        skipped.push(file.name);
+        setStatus(skippedNote(file.name));
+        continue;
+      }
       setStatus(`Preparing ${index + 1} of ${files.length}: ${file.name}`);
       let prepared;
       try {
@@ -587,6 +666,13 @@ export function mountAuthor(root: HTMLElement): void {
       if (prepared.kind !== "photo" && prepared.kind !== "video") continue;
       if (!prepared.objectKey || !prepared.contentType) {
         problems.push(`Could not prepare ${file.name}.`);
+        continue;
+      }
+      const hash = await sha256Hex(prepared.bytes);
+      if (mediaDuplicate("", hash, photos, hashes)) {
+        photos.delete(prepared.filename);
+        skipped.push(file.name);
+        setStatus(skippedNote(file.name));
         continue;
       }
       setStatus(`Uploading ${index + 1} of ${files.length}: ${prepared.filename}`);
@@ -626,6 +712,8 @@ export function mountAuthor(root: HTMLElement): void {
         });
         if (!poolItems.some((item) => item.path === placed.path)) poolItems.push(placed);
         uploaded += 1;
+        hashes.set(hash, prepared.filename);
+        rememberMediaHash(trip.slug, prepared.filename, hash);
         renderPool();
       } catch (error) {
         problems.push(error instanceof Error ? error.message : `Upload of ${file.name} failed.`);
@@ -636,12 +724,16 @@ export function mountAuthor(root: HTMLElement): void {
     } catch {
       renderPool();
     }
+    const skipNote = skipped.map((name) => skippedNote(name)).join(" ");
     if (problems.length) {
-      setStatus(problems[0], true);
+      setStatus([problems[0], skipNote].filter(Boolean).join(" "), true);
     } else if (uploaded) {
       const noun = uploaded === 1 ? "file" : "files";
       const poster = posterWarning ? ` Login poster failed: ${posterWarning}` : "";
-      setStatus(`Uploaded ${uploaded} ${noun}. Click one, then click in the day to place it.${poster}`);
+      const skippedText = skipNote ? ` ${skipNote}` : "";
+      setStatus(`Uploaded ${uploaded} ${noun}. Open Added photos, then drag one onto the day.${poster}${skippedText}`);
+    } else if (skipNote) {
+      setStatus(skipNote);
     }
     } finally {
       uploading = false;
@@ -733,6 +825,8 @@ export function mountAuthor(root: HTMLElement): void {
     showSettingsError("This browser forgot the token.");
   });
 
+  let createPicked: File[] = [];
+
   const titleInput = createForm.querySelector<HTMLInputElement>('[name="title"]');
   const slugInput = createForm.querySelector<HTMLInputElement>('[name="slug"]');
   titleInput?.addEventListener("input", () => {
@@ -781,12 +875,13 @@ export function mountAuthor(root: HTMLElement): void {
         },
         "",
       );
-      const picked = createMedia.files ? [...createMedia.files] : [];
+      const picked = createPicked.length ? createPicked : createMedia.files ? [...createMedia.files] : [];
       await saveNotes([
         { path: indexRepoPath(slug), text: index },
         { path: dayRepoPath(slug, date), text: "\n" },
       ]);
       createForm.reset();
+      createPicked = [];
       if (slugInput) delete slugInput.dataset.touched;
       const next = new URL(`${base}author/`, location.origin);
       next.searchParams.set("trip", slug);
@@ -817,6 +912,17 @@ export function mountAuthor(root: HTMLElement): void {
   bodyEl.addEventListener("input", () => {
     dirty = true;
     setStatus("Unsaved. Save updates the travel log.");
+  });
+
+  coverToggle.addEventListener("click", () => setCoverOpen(coverPanel.hidden));
+  coverClose.addEventListener("click", () => setCoverOpen(false));
+  addPhotosToggle.addEventListener("click", () => setAddOpen(addPhotosPanel.hidden));
+  addPhotosClose.addEventListener("click", () => setAddOpen(false));
+  addedPhotosToggle.addEventListener("click", () => setAddedOpen(addedPhotos.hidden));
+  addedPhotosClose.addEventListener("click", () => setAddedOpen(false));
+  photoPreviewClose.addEventListener("click", () => closePhotoPreview());
+  photoPreview.addEventListener("click", (event) => {
+    if (event.target === photoPreview || event.target === photoPreviewFrame) closePhotoPreview();
   });
 
   saveCoverBtn.addEventListener("click", async () => {
@@ -916,36 +1022,58 @@ export function mountAuthor(root: HTMLElement): void {
     }
   });
 
+  function bindFileDrop(zone: HTMLElement, onFiles: (files: File[]) => void): void {
+    for (const eventName of ["dragenter", "dragover"]) {
+      zone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        zone.classList.add("dragover");
+      });
+    }
+    zone.addEventListener("dragleave", (event) => {
+      event.preventDefault();
+      zone.classList.remove("dragover");
+    });
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("dragover");
+      const files = event.dataTransfer?.files;
+      if (files?.length) onFiles([...files]);
+    });
+  }
+
   mediaInput.addEventListener("change", () => {
     const files = mediaInput.files ? [...mediaInput.files] : [];
     mediaInput.value = "";
     void uploadMedia(files);
+  });
+  bindFileDrop(addDrop, (files) => {
+    setAddOpen(true);
+    void uploadMedia(files);
+  });
+  createMedia.addEventListener("change", () => {
+    createPicked = createMedia.files ? [...createMedia.files] : [];
+  });
+  bindFileDrop(createDrop, (files) => {
+    createPicked = files;
   });
   gpxInput.addEventListener("change", () => {
     const files = gpxInput.files ? [...gpxInput.files] : [];
     gpxInput.value = "";
     void uploadMedia(files);
   });
-  bodyEl.addEventListener("click", () => {
-    if (!selectedPath || bodyEl.selectionStart !== bodyEl.selectionEnd) return;
-    const item = poolItems.find((entry) => entry.path === selectedPath);
-    if (!item) return;
-    placeMarkdown(item.markdown);
-  });
-
   for (const eventName of ["dragenter", "dragover"]) {
     dropzone.addEventListener(eventName, (event) => {
       event.preventDefault();
       dropzone.classList.add("dragover");
     });
   }
-  for (const eventName of ["dragleave", "drop"]) {
-    dropzone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      dropzone.classList.remove("dragover");
-    });
-  }
+  dropzone.addEventListener("dragleave", (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("dragover");
+  });
   dropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("dragover");
     const custom = event.dataTransfer?.getData("application/x-travel-log") || "";
     const plain = event.dataTransfer?.getData("text/plain") || "";
     const markdown = custom || (plain.startsWith("![") || plain.startsWith("<TripVideo") ? plain : "");
@@ -953,8 +1081,9 @@ export function mountAuthor(root: HTMLElement): void {
       placeMarkdown(markdown, dropCaret(event.clientX, event.clientY));
       return;
     }
-    const files = event.dataTransfer?.files;
-    if (files?.length) void uploadMedia([...files]);
+    if (event.dataTransfer?.files?.length) {
+      setStatus("Use Add photos to upload. Drag a thumbnail from Added photos onto the note.", true);
+    }
   });
 
   window.addEventListener("keydown", (event) => {

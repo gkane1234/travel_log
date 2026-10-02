@@ -105,10 +105,13 @@ const { slug = "" } = Astro.props;
         Summary
         <input name="summary" placeholder="A week of rainforest and coast." />
       </label>
-      <label class="file-btn">
-        Add photos and videos
-        <input id="create-media" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" hidden />
-      </label>
+      <div id="create-drop" class="file-drop">
+        <p>Drop photos and videos here</p>
+        <label class="file-btn">
+          Choose photos and videos
+          <input id="create-media" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" />
+        </label>
+      </div>
       <p class="meta">Optional. Add many at once. After the trip is created, you place each one in a day.</p>
       <button type="submit">Create trip</button>
       <p id="create-error" class="error" hidden></p>
@@ -153,12 +156,30 @@ const { slug = "" } = Astro.props;
       <p id="details-error" class="error" hidden></p>
     </form>
     <p>
-      <button type="button" id="publish-trip" class="linkish">Show on the public site</button>
+      <button type="button" class="linkish" data-open-settings>GitHub settings</button>
     </p>
     <div class="cover-picker">
       <p class="meta">Thumbnail</p>
-      <div id="cover-choices" class="cover-grid"></div>
-      <button type="button" id="save-cover">Save thumbnail</button>
+      <p id="cover-summary" class="cover-summary meta">First photo in the trip</p>
+      <button type="button" id="cover-toggle" aria-expanded="false">Change thumbnail</button>
+      <div id="cover-panel" hidden>
+        <div id="cover-choices" class="cover-grid"></div>
+        <button type="button" id="save-cover">Save thumbnail</button>
+        <button type="button" id="cover-close" class="linkish">Close</button>
+      </div>
+    </div>
+    <p>
+      <button type="button" id="add-photos-toggle" aria-expanded="false">Add photos</button>
+    </p>
+    <div id="add-photos-panel" hidden>
+      <div id="add-drop" class="file-drop">
+        <p>Drop photos and videos here</p>
+        <label class="file-btn">
+          Choose photos and videos
+          <input id="media-input" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" />
+        </label>
+      </div>
+      <button type="button" id="add-photos-close" class="linkish">Close</button>
     </div>
 
     <div class="day-nav">
@@ -173,31 +194,37 @@ const { slug = "" } = Astro.props;
 
     <p id="status" class="meta" aria-live="polite"></p>
 
-    <div class="media-pool">
-      <p class="meta">Photos and videos</p>
-      <p id="pool-hint" class="meta">Add many at once. Click a photo or video, then click in the day where it should go. Or drag it into the note.</p>
+    <p>
+      <button type="button" id="added-photos-toggle" aria-expanded="false">Added photos</button>
+    </p>
+    <div id="added-photos" hidden>
+      <p id="pool-hint" class="meta">Drag a thumbnail onto the day note. Double-click to see it full size.</p>
       <div id="media-pool" class="cover-grid"></div>
+      <button type="button" id="added-photos-close" class="linkish">Close</button>
     </div>
 
     <div id="dropzone" class="dropzone">
       <textarea
         id="day-body"
         rows="18"
-        placeholder="Write this day's notes. Drop photos, videos, or GPX here (or use the buttons)."
+        placeholder="Write this day's notes. Drag a thumbnail from Added photos onto this text."
       ></textarea>
-      <div class="drop-hint">Drop photos, videos, or GPX here. Photos and videos are added to the grid above so you can see them before they go in the day. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
+      <div class="drop-hint">Drag a photo or video from Added photos onto this note. A click does not add it. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
     </div>
 
     <div class="upload-row">
       <label class="file-btn">
-        Add photos / videos
-        <input id="media-input" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" hidden />
-      </label>
-      <label class="file-btn">
         Add GPX
-        <input id="gpx-input" type="file" accept=".gpx,.zip" hidden />
+        <input id="gpx-input" type="file" accept=".gpx,.zip" />
       </label>
     </div>
+    <p class="publish-row">
+      <button type="button" id="publish-trip" class="is-danger">Hide from the public site</button>
+    </p>
+  </div>
+  <div id="photo-preview" hidden>
+    <button type="button" id="photo-preview-close">Close</button>
+    <div id="photo-preview-frame"></div>
   </div>
 </section>
 
@@ -321,6 +348,50 @@ const { slug = "" } = Astro.props;
   .cover-picker {
     margin: 0.25rem 0 0.75rem;
   }
+  .cover-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.2rem 0 0.45rem;
+  }
+  .cover-summary img {
+    width: 3rem;
+    height: 2.2rem;
+    object-fit: cover;
+    margin: 0;
+  }
+  #cover-toggle,
+  #add-photos-toggle {
+    font-size: 0.9rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .file-drop {
+    display: grid;
+    gap: 0.55rem;
+    justify-items: start;
+    margin: 0.6rem 0;
+    padding: 0.9rem;
+    border: 1px dashed var(--line);
+    background: var(--surface);
+  }
+  .file-drop.dragover {
+    outline: 2px solid var(--accent);
+  }
+  .file-drop p {
+    margin: 0;
+  }
+  .file-btn {
+    position: relative;
+  }
+  .file-btn input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
   .cover-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
@@ -364,6 +435,44 @@ const { slug = "" } = Astro.props;
     border: 1px solid var(--line);
     background: var(--surface);
     color: var(--ink);
+  }
+  #photo-preview {
+    position: fixed;
+    inset: 0;
+    z-index: 6;
+    display: grid;
+    place-items: center;
+    background: rgba(28, 36, 30, 0.9);
+  }
+  #photo-preview[hidden] {
+    display: none;
+  }
+  #photo-preview img,
+  #photo-preview video {
+    max-width: min(92vw, 64rem);
+    max-height: 86vh;
+    margin: 0;
+  }
+  #photo-preview-close {
+    position: absolute;
+    top: 0.8rem;
+    right: 0.8rem;
+    background: var(--surface);
+    color: var(--ink);
+    border: 0;
+  }
+  #publish-trip {
+    margin-top: 2.5rem;
+    font-size: 0.95rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  #publish-trip.is-danger {
+    background: #8a2f2f;
+    border-color: #8a2f2f;
+    color: #fff;
   }
   .upload-row {
     display: flex;

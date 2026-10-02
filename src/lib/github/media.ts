@@ -67,6 +67,18 @@ function contentTypeFor(ext: string): string {
   return "image/jpeg";
 }
 
+/** Name this file would be stored under, before a numeric suffix is added. */
+export function plannedMediaFilename(filename: string): string {
+  const ext = extOf(filename);
+  const base = sanitizeBasename(filename);
+  if (ext === ".heic" || ext === ".heif" || ext === ".jpg" || ext === ".jpeg" || ext === ".png" || ext === ".webp") {
+    return `${base}.jpg`;
+  }
+  if (ext === ".gif") return `${base}.gif`;
+  if (ext === ".mp4" || ext === ".m4v" || ext === ".webm" || ext === ".mov") return `${base}${ext}`;
+  return "";
+}
+
 export async function prepareDroppedFile(
   file: File,
   slug: string,

@@ -76,23 +76,30 @@ function firstPhotoInMarkdown(raw) {
   return "";
 }
 
+function noteMediaButton(kind, href, inner) {
+  const safe = escapeHtml(href);
+  return `<button type="button" class="note-media" data-kind="${kind}" data-src="${safe}">${inner}</button>`;
+}
+
 function renderBody(raw) {
   let text = parseFrontmatter(raw).body;
   text = text.replace(/<TripVideo\s+src="([^"]+)"\s*\/?\s*>/g, (_, src) => {
-    const href = escapeHtml(mediaUrl(src));
-    return `<figure class="trip-video"><video controls playsinline preload="metadata" src="${href}"></video></figure>`;
+    const href = mediaUrl(src);
+    const safe = escapeHtml(href);
+    return noteMediaButton("video", href, `<video muted playsinline preload="metadata" src="${safe}"></video>`);
   });
   text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
-    const href = escapeHtml(mediaUrl(src.trim()));
-    if (/\.mp4($|\?)/i.test(src)) {
-      return `<figure class="trip-video"><video controls playsinline preload="metadata" src="${href}"></video></figure>`;
+    const href = mediaUrl(src.trim());
+    const safe = escapeHtml(href);
+    if (/\.(mp4|m4v|webm|mov)($|\?)/i.test(src)) {
+      return noteMediaButton("video", href, `<video muted playsinline preload="metadata" src="${safe}"></video>`);
     }
-    return `<img src="${href}" alt="${escapeHtml(alt)}" />`;
+    return noteMediaButton("photo", href, `<img src="${safe}" alt="${escapeHtml(alt)}" />`);
   });
   const blocks = text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
   return blocks
     .map((block) => {
-      if (block.startsWith("<figure") || block.startsWith("<img")) return block;
+      if (block.startsWith("<button") || block.startsWith("<figure") || block.startsWith("<img")) return block;
       return `<p>${escapeHtml(block).replace(/\n/g, "<br />")}</p>`;
     })
     .join("\n");
@@ -136,10 +143,20 @@ function page(title, main, motion) {
     .trip-list h2, .trip-list p { margin: 0.15rem 0; }
     .day { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #cfc5b4; }
     .gallery { margin: 0.4rem 0 1.4rem; }
+    .gallery-bar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
     .gallery h2 { font-size: 1.05rem; margin: 0.6rem 0; }
     .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 0.45rem; }
-    .gallery-item { display: block; width: 100%; margin: 0; padding: 0; border: 0; background: #e4ddd0; cursor: pointer; aspect-ratio: 4 / 3; overflow: hidden; }
+    .gallery-item, .note-media { cursor: zoom-in; }
+    .gallery-item { display: block; width: 100%; margin: 0; padding: 0; border: 0; background: #e4ddd0; aspect-ratio: 4 / 3; overflow: hidden; }
     .gallery-item img, .gallery-item video { width: 100%; height: 100%; object-fit: cover; margin: 0; pointer-events: none; }
+    button.note-media { display: block; width: 100%; margin: 1rem 0; padding: 0; border: 0; background: transparent; text-align: left; }
+    button.note-media img, button.note-media video { margin: 0; width: 100%; pointer-events: none; }
+    .add-media, a.edit-trip { font-family: "Segoe UI", sans-serif; font-size: 0.9rem; text-decoration: none; border: 1px solid #2e4a3e; color: #2e4a3e; background: transparent; padding: 0.3rem 0.65rem; cursor: pointer; }
+    .add-media { position: relative; background: #2e4a3e; color: #fff; }
+    .add-media input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .file-drop { border: 1px dashed #8a8175; padding: 0.8rem; margin: 0.4rem 0 0.6rem; display: grid; gap: 0.55rem; justify-items: start; }
+    .file-drop.dragover { outline: 2px solid #2e4a3e; }
+    .file-drop p { margin: 0; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; }
     #lightbox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(28, 36, 30, 0.9); }
     #lightbox[hidden] { display: none; }
     #lightbox img, #lightbox video { max-width: min(92vw, 64rem); max-height: 86vh; margin: 0; }
@@ -254,8 +271,8 @@ function motionModel(catalog) {
   };
 }
 
-const GALLERY_FILE = /\.(jpe?g|png|gif|webp|mp4|webm|mov)$/i;
-const VIDEO_FILE = /\.(mp4|webm|mov)$/i;
+const GALLERY_FILE = /\.(jpe?g|png|gif|webp|mp4|m4v|webm|mov)$/i;
+const VIDEO_FILE = /\.(mp4|m4v|webm|mov)$/i;
 
 function galleryItemFromSrc(src) {
   const value = String(src || "").trim().split(/[?#]/)[0];
@@ -307,7 +324,6 @@ async function tripGallery(bucket, slug, notes) {
 }
 
 function galleryMarkup(items) {
-  if (!items.length) return "";
   const tiles = items
     .map((item) => {
       const src = escapeHtml(item.url);
@@ -317,35 +333,146 @@ function galleryMarkup(items) {
       return `<button type="button" class="gallery-item" data-kind="photo" data-src="${src}"><img src="${src}" alt="" /></button>`;
     })
     .join("");
-  return `<section class="gallery" aria-label="Photos and videos"><h2>Photos and videos</h2><div class="gallery-grid">${tiles}</div></section>
-<div id="lightbox" hidden><button type="button" id="lightbox-close">Close</button><div id="lightbox-frame"></div></div>
+  const grid = tiles ? `<div class="gallery-grid">${tiles}</div>` : "";
+  return `<section class="gallery" aria-label="Photos and videos"><div class="gallery-bar"><h2>Photos and videos</h2></div><div id="gallery-drop" class="file-drop"><p>Drop photos and videos here</p><label class="add-media">Choose photos and videos<input id="gallery-add" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" /></label></div><p id="gallery-status" class="meta"></p>${grid}</section>`;
+}
+
+function tripViewer(slug) {
+  const slugLiteral = JSON.stringify(slug);
+  return `<div id="lightbox" hidden><button type="button" id="lightbox-close">Close</button><div id="lightbox-frame"></div></div>
 <script>
 (() => {
+  const slug = ${slugLiteral};
   const box = document.getElementById("lightbox");
   const frame = document.getElementById("lightbox-frame");
-  document.getElementById("lightbox-close").addEventListener("click", shut);
-  box.addEventListener("click", (event) => { if (event.target === box) shut(); });
+  const close = document.getElementById("lightbox-close");
   function shut() { box.hidden = true; frame.replaceChildren(); }
-  document.querySelectorAll(".gallery-item").forEach((button) => {
-    button.addEventListener("click", () => {
-      frame.replaceChildren();
-      const src = button.dataset.src || "";
-      if (button.dataset.kind === "video") {
-        const video = document.createElement("video");
-        video.controls = true;
-        video.playsInline = true;
-        video.autoplay = true;
-        video.src = src;
-        frame.append(video);
-      } else {
-        const img = document.createElement("img");
-        img.alt = "";
-        img.src = src;
-        frame.append(img);
-      }
-      box.hidden = false;
-    });
+  function openViewer(kind, src) {
+    frame.replaceChildren();
+    if (kind === "video") {
+      const video = document.createElement("video");
+      video.controls = true;
+      video.playsInline = true;
+      video.autoplay = true;
+      video.src = src;
+      frame.append(video);
+    } else {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.src = src;
+      frame.append(img);
+    }
+    box.hidden = false;
+  }
+  close.addEventListener("click", shut);
+  box.addEventListener("click", (event) => {
+    if (event.target === box || event.target === frame) shut();
   });
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".gallery-item, .note-media");
+    if (!button || !button.dataset.src) return;
+    openViewer(button.dataset.kind, button.dataset.src);
+  });
+  const input = document.getElementById("gallery-add");
+  const drop = document.getElementById("gallery-drop");
+  const status = document.getElementById("gallery-status");
+  let busy = false;
+  function say(message) { if (status) status.textContent = message; }
+  function names() {
+    const found = new Set();
+    document.querySelectorAll(".gallery-item, .note-media").forEach((node) => {
+      const name = (node.dataset.src || "").split("/").pop();
+      if (name) found.add(decodeURIComponent(name));
+    });
+    return found;
+  }
+  function tile(item) {
+    let grid = document.querySelector(".gallery-grid");
+    if (!grid) {
+      grid = document.createElement("div");
+      grid.className = "gallery-grid";
+      const section = document.querySelector(".gallery");
+      if (!section) return;
+      section.append(grid);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gallery-item";
+    button.dataset.kind = item.kind;
+    button.dataset.src = item.url;
+    if (item.kind === "video") {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.src = item.url;
+      button.append(video);
+    } else {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.src = item.url;
+      button.append(img);
+    }
+    grid.append(button);
+  }
+  async function uploader() {
+    if (window.travelLogUploadGallery) return window.travelLogUploadGallery;
+    const response = await fetch("/travel-log/gallery-client/", { credentials: "same-origin" });
+    if (!response.ok) throw new Error("Could not load the photo uploader.");
+    const html = await response.text();
+    const named = html.match(/src="([^"]*gallery-client[^"]*\\.js)"/);
+    const any = html.match(/<script type="module" src="([^"]+)"/);
+    const src = (named || any || [])[1];
+    if (!src) throw new Error("Could not load the photo uploader.");
+    await import(new URL(src, location.origin).href);
+    if (!window.travelLogUploadGallery) throw new Error("Could not load the photo uploader.");
+    return window.travelLogUploadGallery;
+  }
+  async function send(files) {
+    if (!files.length || busy) return;
+    busy = true;
+    try {
+      const upload = await uploader();
+      const result = await upload(slug, files, names(), say);
+      result.added.forEach(tile);
+      const skipped = result.skipped || [];
+      const skipNote = skipped.map((name) => "Skipped " + name + " because it is already there.").join(" ");
+      if (result.error) say(skipNote ? result.error + " " + skipNote : result.error);
+      else if (skipNote && result.added.length) say("Added to the gallery. " + skipNote);
+      else if (skipNote) say(skipNote);
+      else if (result.added.some((item) => item.posterFailed)) say("Added to the gallery. Login poster failed.");
+      else say(result.added.length ? "Added to the gallery." : "Nothing was added.");
+    } catch (error) {
+      say(error && error.message ? error.message : "Could not add those files.");
+    } finally {
+      busy = false;
+    }
+  }
+  if (input) {
+    input.addEventListener("change", () => {
+      const files = input.files ? Array.from(input.files) : [];
+      input.value = "";
+      void send(files);
+    });
+  }
+  if (drop) {
+    ["dragenter", "dragover"].forEach((name) => {
+      drop.addEventListener(name, (event) => {
+        event.preventDefault();
+        drop.classList.add("dragover");
+      });
+    });
+    drop.addEventListener("dragleave", (event) => {
+      event.preventDefault();
+      drop.classList.remove("dragover");
+    });
+    drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      drop.classList.remove("dragover");
+      const list = event.dataTransfer && event.dataTransfer.files ? Array.from(event.dataTransfer.files) : [];
+      void send(list);
+    });
+  }
 })();
 </script>`;
 }
@@ -432,5 +559,9 @@ export async function renderJournal(bucket, url) {
   const when = formatRange(data.date, data.endDate);
   const where = [data.location, when].filter(Boolean).join(" · ");
   const gallery = galleryMarkup(await tripGallery(bucket, slug, [body, ...dayNotes]));
-  return page(data.title || slug, `<p class="meta"><a href="${PREFIX}/">Trips</a></p><h1>${escapeHtml(data.title || slug)}</h1><p class="meta">${escapeHtml(where)}</p>${gallery}${renderBody(body)}${days.join("")}`);
+  const edit = `${PREFIX}/author/?trip=${encodeURIComponent(slug)}`;
+  return page(
+    data.title || slug,
+    `<p class="meta"><a href="${PREFIX}/">Trips</a> · <a class="edit-trip" href="${edit}">Edit</a></p><h1>${escapeHtml(data.title || slug)}</h1><p class="meta">${escapeHtml(where)}</p>${gallery}${renderBody(body)}${days.join("")}${tripViewer(slug)}`,
+  );
 }

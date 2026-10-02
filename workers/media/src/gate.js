@@ -142,18 +142,13 @@ export function loginPage(next, error) {
   </main>
   <script>
 (() => {
+  const showPosters = false;
   const KEY = "travel-log-login";
   const defaults = { size: 80, blur: 0, opacity: 0.9, speed: 18, appearDelay: 2 };
   const stage = document.getElementById("poster-stage");
   const form = document.getElementById("login-form");
   const panel = document.getElementById("login-panel");
   const toggle = document.getElementById("login-toggle");
-  const showPosters = false;
-  if (!showPosters) {
-    if (toggle) toggle.hidden = true;
-    if (panel) panel.setAttribute("hidden", "");
-    if (stage) stage.replaceChildren();
-  }
   const settings = Object.assign({}, defaults, read());
   const LOADERS = 3;
   let active = 0;
@@ -294,7 +289,12 @@ export function loginPage(next, error) {
     }
     requestAnimationFrame(tick);
   }
-  if (showPosters) {
+  if (!showPosters) {
+    if (stage) stage.replaceChildren();
+    if (toggle) toggle.hidden = true;
+    if (panel) panel.hidden = true;
+    return;
+  }
   requestAnimationFrame(tick);
   fetch("/travel-log/login-posters", { credentials: "same-origin" }).then((response) => {
     if (!response.ok || !response.body) return;
@@ -326,7 +326,6 @@ export function loginPage(next, error) {
     }
     return pull();
   }).catch(() => {});
-  }
 })();
   </script>
 </body>

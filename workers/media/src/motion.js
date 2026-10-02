@@ -13,6 +13,7 @@ const DEFAULTS = {
   nameSpeed: 24,
   nameCards: 4,
   photoWidth: 280,
+  cardSize: 80,
   look: "current",
 };
 
@@ -43,6 +44,7 @@ export function motionMarkup(model) {
     ${field("recentLimit", "Recent photos", 1, 80, 1)}
     ${field("maxPhotos", "Photos on screen", 1, 20, 1)}
     ${field("photoWidth", "Photo width (px)", 80, 640, 10)}
+    ${field("cardSize", "Card size (px)", 40, 320, 4)}
     ${field("nameSpeed", "Name card speed", 4, 120, 1)}
     ${field("nameCards", "Name cards", 1, 12, 1)}
   </form>
@@ -272,7 +274,7 @@ export function motionMarkup(model) {
           when.textContent = bits.join(" · ");
           caption.append(title, when);
           card.append(img, caption);
-          const size = Math.max(40, Number(settings.photoWidth) || 80);
+          const size = Math.max(40, Number(settings.cardSize) || 80);
           const angle = Math.random() * Math.PI * 2;
           card.style.width = size + "px";
           card.style.opacity = String(Math.min(1, Math.max(0, Number(settings.peakOpacity) || 0)));
@@ -344,7 +346,7 @@ export function motionMarkup(model) {
     last = now;
     if (cardMode()) {
       const speed = Math.max(0, Number(settings.nameSpeed) || 0);
-      const size = Math.max(40, Number(settings.photoWidth) || 80);
+      const size = Math.max(40, Number(settings.cardSize) || 80);
       const opacity = Math.min(1, Math.max(0, Number(settings.peakOpacity) || 0));
       for (const card of driftCards) {
         let x = Number(card.dataset.x) + Math.cos(Number(card.dataset.angle)) * speed * dt;

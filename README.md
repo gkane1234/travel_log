@@ -1,6 +1,6 @@
 # Travel Log
 
-Astro site for trip journals. Public pages (`/` and `/trips/<slug>/`) are built from the markdown in `trips/`. The author page is a browser app. Save commits that same markdown to GitHub, and GitHub Actions publishes the site to GitHub Pages. PC, Mac, and iPhone all use that one page.
+Astro site for the travel log. The live journal at https://gabriel-kane.com/travel-log is rendered by the Cloudflare Worker from the private R2 bucket. The author page writes trip notes, day files, and covers to that bucket. GitHub holds the website code. PC, Mac, and iPhone all use that one author page.
 
 ## Run locally
 
@@ -18,21 +18,17 @@ npm run dev
 
 ## Author
 
-Open `/author/`. The first time, enter a GitHub personal access token and the repo (`gkane1234` / `travel_log`, branch `master`). Those stay in this browser’s localStorage only.
+Open https://gabriel-kane.com/travel-log/author after signing in as jumbo or gumbo. Click **Save day** to write that day's note to the bucket. **Save thumbnail** writes the cover into the trip index. **Show on the public site** publishes a new trip. None of those saves commit trip files to GitHub.
 
-Saving a day commits the markdown to GitHub through the Git Data API. GitHub Actions then publishes the site to GitHub Pages. That workflow is `.github/workflows/pages.yml` and still runs on every push to `master`.
+The editor re-encodes each new photo in the browser so the original file, including EXIF and GPS, is not uploaded. It then stores the photo address in the day note. HEIC becomes JPEG before that re-encode. JPEG, PNG, and WebP are re-encoded to a clean JPEG. Video bytes are uploaded unchanged, so location data in a video may remain. A failed save is shown in the editor. GPX files are stored with the trip in the bucket.
 
-Photos and videos are not part of that commit. The editor re-encodes each new photo in the browser so the original file, including EXIF and GPS, is not uploaded. It then stores the Worker media URL in the day note. HEIC becomes JPEG before that re-encode. JPEG, PNG, and WebP are re-encoded to a clean JPEG. Video bytes are uploaded unchanged, so location data in a video may remain. MP4, MOV, and WebM can be larger than 100 MB. A failed upload is shown in the editor and is not written into git. GPX files stay in `routes/` and are committed with the note. Nothing over 50 MB is committed.
-
-Create a GitHub token at Settings → Developer settings → Personal access tokens. Classic tokens need the `repo` scope. Fine-grained tokens need read and write on Contents for this repository.
-
-In the same settings screen, set **Media upload URL** to the Cloudflare Worker address from the section below. Leave **Upload token** blank to send the GitHub token, or paste a separate token that exists only on this device.
+On gabriel-kane.com the login cookie is enough to save. The author settings can still hold a GitHub token or upload token, and a media upload URL, if you add photos from a browser that is not already signed in.
 
 ## Photos and videos (Cloudflare R2)
 
 The default store is a private Cloudflare R2 bucket. The same Worker speaks S3, so Backblaze B2 is the same setup with different endpoint values. Bucket secrets and the photo password stay in Worker secrets. They are not in this repo and not in the static site.
 
-Trip notes and GitHub Pages stay public. This repo was not made private, and the Pages workflow is unchanged. Anyone who can open github.com or `https://gkane1234.github.io/travel_log/` can read the notes. A photo login does not hide the notes. Make the GitHub repo private yourself if the notes should not be on github.com. GitHub Pages on a public repo stays public either way.
+Trip notes live in the private R2 bucket. The journal is shown only after the photo login. GitHub Pages still publishes the website code, including the author page.
 
 Photos and videos are not public. The bucket has no r2.dev URL in the notes. A day note stores a URL on your Cloudflare site, such as `https://gabriel-kane.com/travel-log/media/olympic-peninsula/shore.jpg`. The Worker returns that file only when the browser sends the photo-login cookie. A direct link without the cookie gets 401.
 
@@ -108,11 +104,12 @@ Keep the bucket private. `MEDIA_BASE_URL` is still your Cloudflare site, not a p
 ## Trip folder layout
 
 ```
-trips/<slug>/
-  index.md              # title, dates, location, summary
-  days/YYYY-MM-DD.mdx   # one file per day
-  photos/               # older pictures already in git; new ones are not added here
-  routes/               # GPX files, still committed
+trips/<slug>/index.md
+trips/<slug>/days/YYYY-MM-DD.mdx
+media/<slug>/photos/<file>
+trips/<slug>/routes/<file>.gpx
 ```
+
+Those objects are in the `travel-log-media` bucket. They are not committed to this repo.
 
 Your raw “Olympic Peninsula” source folder is left alone; copy media into a trip through Author when you are ready.

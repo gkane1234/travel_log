@@ -15,8 +15,11 @@ node_modules/
 Thumbs.db
 *.swp
 
-# authoring originals (converted copies live in trips/)
+# authoring originals
 Olympic Peninsula/
+
+# Trip notes and media live in R2. Local authoring may recreate this folder.
+trips/
 
 # scratch logs from local debugging
 second-dev-*.txt

@@ -25,18 +25,19 @@ export async function uploadToBucket(options: {
       "Media upload URL is not set. Add it in GitHub settings. Photos and videos are not saved in the git repo.",
     );
   }
-  if (!options.token) {
-    throw new Error("Sign in with a GitHub token, or set an upload token, before adding photos.");
+  const same = typeof location !== "undefined" && workerUrl === location.origin;
+  if (!options.token && !same) {
+    throw new Error("Sign in to the travel log before adding photos.");
   }
 
   let signed: SignedUpload;
   try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (options.token) headers.Authorization = `Bearer ${options.token}`;
     const response = await fetch(`${workerUrl}/travel-log/sign`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.token}`,
-        "Content-Type": "application/json",
-      },
+      credentials: same ? "include" : "omit",
+      headers,
       body: JSON.stringify({
         key: options.objectKey,
         contentType: options.contentType,
@@ -61,12 +62,69 @@ export async function uploadToBucket(options: {
     body: options.bytes,
   });
   if (!put.ok) {
-    throw new Error(`Upload of ${options.objectKey.split("/").pop()} failed (${put.status}). The note was not committed.`);
+    throw new Error(`Upload of ${options.objectKey.split("/").pop()} failed (${put.status}). The note was not saved.`);
   }
   if (!/^https?:\/\//i.test(signed.publicUrl)) {
     throw new Error("Media storage did not return a public http(s) URL.");
   }
   return signed.publicUrl;
+}
+
+export type TripNote = { path: string; text: string | null };
+
+function notesEndpoint(workerUrl: string): { origin: string; same: boolean } {
+  const origin = mediaWorkerOrigin(workerUrl) || (typeof location !== "undefined" ? location.origin : "");
+  const same = typeof location !== "undefined" && origin === location.origin;
+  return { origin, same };
+}
+
+async function postTravelLog(
+  path: string,
+  options: { workerUrl: string; token: string },
+  body: unknown,
+): Promise<Record<string, unknown>> {
+  const { origin, same } = notesEndpoint(options.workerUrl);
+  if (!origin) {
+    throw new Error("Open the author at https://gabriel-kane.com/travel-log/author and sign in.");
+  }
+  if (!options.token && !same) {
+    throw new Error("Sign in to the travel log before saving.");
+  }
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  const response = await fetch(`${origin}/travel-log/${path}`, {
+    method: "POST",
+    credentials: same ? "include" : "omit",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const data = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) throw new Error(data.error || "The travel log could not save that.");
+  return data;
+}
+
+export async function writeTripNotes(options: {
+  workerUrl: string;
+  token: string;
+  files: { path: string; text: string }[];
+}): Promise<void> {
+  await postTravelLog("notes", options, { files: options.files });
+}
+
+export async function readTripNotes(options: {
+  workerUrl: string;
+  token: string;
+  paths: string[];
+}): Promise<TripNote[]> {
+  const data = await postTravelLog("notes/read", options, { paths: options.paths });
+  const files = data.files;
+  return Array.isArray(files) ? (files as TripNote[]) : [];
+}
+
+export async function listTripNoteKeys(options: { workerUrl: string; token: string }): Promise<string[]> {
+  const data = await postTravelLog("notes/list", options, {});
+  const keys = data.keys;
+  return Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : [];
 }
 
 export async function saveTripCover(options: {

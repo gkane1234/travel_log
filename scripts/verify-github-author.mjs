@@ -16,6 +16,7 @@ import { mediaPublicUrl, storageConfigError } from "../workers/media/src/config.
 import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
 import { checkLogin, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
 import { isTripCoverPath, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
+import { putTripNotes, tripNoteKey } from "../workers/media/src/notes.js";
 import sharp from "sharp";
 
 const day = dayRepoPath("olympic-peninsula", "2026-09-08");
@@ -234,5 +235,37 @@ files.set(
 );
 const picked = await renderJournal(bucket, new URL("https://gabriel-kane.com/travel-log/"));
 assert.match(await picked.text(), /src="\/travel-log\/media\/olympic-peninsula\/photos\/picked\.jpg"/);
+
+assert.equal(tripNoteKey("trips/coast/index.md"), "trips/coast/index.md");
+assert.equal(tripNoteKey("trips/coast/days/2026-04-01.mdx"), "trips/coast/days/2026-04-01.mdx");
+assert.equal(tripNoteKey("trips/coast/photos/a.jpg"), "");
+assert.equal(tripNoteKey("../trips/coast/index.md"), "");
+
+const saved = new Map();
+const writable = {
+  async put(key, text) {
+    saved.set(key, text);
+  },
+  async get(key) {
+    const text = saved.get(key);
+    if (text == null) return null;
+    return { text: async () => text };
+  },
+  async list({ prefix }) {
+    return {
+      objects: [...saved.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })),
+      truncated: false,
+    };
+  },
+};
+await putTripNotes(writable, [
+  { path: "trips/coast/index.md", text: "---\ntitle: Coast Walk\ndate: 2026-04-01\ndraft: false\n---\n" },
+  { path: "trips/coast/days/2026-04-01.mdx", text: "Saw a heron.\n" },
+]);
+await assert.rejects(() => putTripNotes(writable, [{ path: "trips/coast/photos/a.jpg", text: "no" }]));
+const coastHome = await renderJournal(writable, new URL("https://gabriel-kane.com/travel-log/"));
+assert.match(await coastHome.text(), /Coast Walk/);
+const coastPage = await renderJournal(writable, new URL("https://gabriel-kane.com/travel-log/trips/coast"));
+assert.match(await coastPage.text(), /Saw a heron/);
 
 console.log("github author checks ok");

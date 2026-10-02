@@ -1,27 +1,19 @@
-import { commitFiles, getBranchTip, listTreePaths, readTextFile } from "./api.ts";
 import {
-  createTripMessage,
   dayRepoPath,
   filenamesIn,
   imageMarkdownUrl,
   indexRepoPath,
   indexTrips,
   photoPathsInMarkdown,
-  saveDayMessage,
   videoMarkdownUrl,
 } from "./commit-plan.ts";
 import { addDays, slugify } from "./dates.ts";
 import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip } from "./frontmatter.ts";
 import { prepareDroppedFile } from "./media.ts";
-import { clearSettings, loadSettings, saveSettings, type GithubSettings } from "./settings.ts";
-import { saveTripCover, uploadToBucket } from "./upload.ts";
+import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
+import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 
-type Tip = { commitSha: string; treeSha: string };
 type PreparedRoute = { repoPath: string; bytes: Uint8Array };
-
-function textBytes(value: string): Uint8Array {
-  return new TextEncoder().encode(value);
-}
 
 function insertAtCursor(textarea: HTMLTextAreaElement, text: string): void {
   const start = textarea.selectionStart ?? textarea.value.length;
@@ -48,7 +40,6 @@ export function mountAuthor(root: HTMLElement): void {
   const pathSlug = root.dataset.slug || "";
   const params = new URLSearchParams(location.search);
   let settings = loadSettings();
-  let tip: Tip | null = null;
   let paths: string[] = [];
   let trip: RemoteTrip | null = null;
   let currentDate = params.get("date") || "";
@@ -127,30 +118,28 @@ export function mountAuthor(root: HTMLElement): void {
     settingsError.hidden = !message;
   }
 
-  async function refreshTip(): Promise<void> {
-    if (!settings) throw new Error("GitHub is not set up in this browser.");
-    tip = await getBranchTip(settings);
-    paths = await listTreePaths(settings, tip.treeSha);
+  function notesTarget(): { workerUrl: string; token: string } {
+    const configured = settings?.mediaWorkerUrl ? mediaWorkerOrigin(settings.mediaWorkerUrl) : "";
+    return {
+      workerUrl: configured || location.origin,
+      token: settings?.uploadToken || settings?.token || "",
+    };
   }
 
-  async function ensureTip(): Promise<Tip> {
-    if (!settings) throw new Error("GitHub is not set up in this browser.");
-    if (!tip) await refreshTip();
-    if (!tip) throw new Error("Could not read the repository.");
-    return tip;
+  async function loadBucketPaths(): Promise<void> {
+    paths = await listTripNoteKeys(notesTarget());
   }
 
-  function rememberFiles(filePaths: string[]): void {
-    for (const filePath of filePaths) {
-      if (!paths.includes(filePath)) paths.push(filePath);
+  async function readNote(path: string): Promise<string | null> {
+    const files = await readTripNotes({ ...notesTarget(), paths: [path] });
+    return files[0]?.text ?? null;
+  }
+
+  async function saveNotes(files: { path: string; text: string }[]): Promise<void> {
+    await writeTripNotes({ ...notesTarget(), files });
+    for (const file of files) {
+      if (!paths.includes(file.path)) paths.push(file.path);
     }
-  }
-
-  async function commit(message: string, files: { path: string; bytes: Uint8Array }[]): Promise<void> {
-    if (!settings) throw new Error("GitHub is not set up in this browser.");
-    const current = await ensureTip();
-    tip = await commitFiles(settings, message, files, current);
-    rememberFiles(files.map((file) => file.path));
   }
 
   function dayPath(slug: string, date: string): string {
@@ -225,7 +214,7 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   async function refreshCoverChoices(): Promise<void> {
-    if (!settings || !trip) return;
+    if (!trip) return;
     const found: string[] = [];
     const add = (markdown: string) => {
       for (const path of photoPathsInMarkdown(trip!.slug, markdown)) {
@@ -234,43 +223,33 @@ export function mountAuthor(root: HTMLElement): void {
     };
     for (const date of [...trip.dayDates].sort()) {
       if (date === currentDate) continue;
-      const raw = await readTextFile(settings, dayPath(trip.slug, date));
+      const raw = await readNote(dayPath(trip.slug, date));
       add(raw ?? "");
     }
     add(bodyEl.value);
     fillCoverSelect(found);
   }
 
-  async function persistCover(cover: string): Promise<string> {
-    if (!settings || !trip) throw new Error("Open a trip first.");
-    const raw = await readTextFile(settings, trip.indexPath);
+  async function persistCover(cover: string): Promise<void> {
+    if (!trip) throw new Error("Open a trip first.");
+    const raw = await readNote(trip.indexPath);
     if (raw == null) throw new Error("Could not read the trip index.");
     const parsed = parseFrontmatter(raw);
     if (cover) parsed.data.cover = cover;
     else delete parsed.data.cover;
-    await commit(`Set thumbnail for ${trip.title}`, [
-      { path: trip.indexPath, bytes: textBytes(stringifyFrontmatter(parsed.data, parsed.body)) },
-    ]);
+    await saveNotes([{ path: trip.indexPath, text: stringifyFrontmatter(parsed.data, parsed.body) }]);
     trip = { ...trip, cover: cover || undefined };
     renderTripMeta();
-    if (!settings.mediaWorkerUrl) return "";
-    await saveTripCover({
-      workerUrl: settings.mediaWorkerUrl,
-      token: settings.uploadToken || settings.token,
-      slug: trip.slug,
-      cover,
-    });
-    return "";
   }
 
   async function loadDay(date: string, options: { saveFirst?: boolean } = {}): Promise<void> {
-    if (!settings || !trip) return;
+    if (!trip) return;
     if (options.saveFirst !== false && dirty) {
       const ok = await saveDay();
       if (!ok) return;
     }
     setStatus("Loading…");
-    const raw = await readTextFile(settings, dayPath(trip.slug, date));
+    const raw = await readNote(dayPath(trip.slug, date));
     currentDate = date;
     bodyEl.value = raw ?? "";
     dirty = false;
@@ -280,27 +259,23 @@ export function mountAuthor(root: HTMLElement): void {
     url.searchParams.set("date", date);
     history.replaceState({}, "", url);
     await refreshCoverChoices();
-    setStatus(`Editing ${date}. Save sends this day to GitHub.`);
+    setStatus(`Editing ${date}. Save updates the travel log.`);
   }
 
   async function openTrip(slug: string, date?: string): Promise<void> {
-    if (!settings) {
-      show("settings");
-      return;
-    }
     show("editor");
     setStatus("Loading…");
     try {
-      await ensureTip();
+      await loadBucketPaths();
       const found = indexTrips(paths).find((item) => item.slug === slug);
       if (!found) {
         titleEl.textContent = "Trip not found";
-        setStatus("That trip is not on GitHub yet.");
+        setStatus("That trip is not on the site yet.");
         return;
       }
-      const raw = await readTextFile(settings, found.indexPath);
+      const raw = await readNote(found.indexPath);
       if (raw == null) {
-        setStatus("Could not read the trip index.");
+        setStatus("Could not read the trip.");
         return;
       }
       trip = tripFromIndex(slug, found.indexPath, raw, found.days);
@@ -314,21 +289,18 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   async function saveDay(): Promise<boolean> {
-    if (!trip || !currentDate || !settings) return false;
+    if (!trip || !currentDate) return false;
     if (saving) return false;
     saving = true;
     const body = bodyEl.value;
     const date = currentDate;
     const slug = trip.slug;
-    const title = trip.title;
     setStatus("Saving…");
     try {
-      await commit(saveDayMessage(title, date), [
-        { path: dayPath(slug, date), bytes: textBytes(body) },
-      ]);
+      await saveNotes([{ path: dayPath(slug, date), text: body }]);
       if (!trip.dayDates.includes(date)) trip.dayDates.push(date);
       if (bodyEl.value === body && currentDate === date) dirty = false;
-      setStatus("Saved to GitHub");
+      setStatus("Saved to the travel log.");
       return true;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Save failed");
@@ -339,7 +311,7 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   async function saveWithFiles(routes: PreparedRoute[], cover?: string): Promise<void> {
-    if (!trip || !currentDate || !settings) return;
+    if (!trip || !currentDate) return;
     if (saving) return;
     saving = true;
     const body = bodyEl.value;
@@ -347,37 +319,26 @@ export function mountAuthor(root: HTMLElement): void {
     setStatus("Saving…");
     try {
       const files = [
-        ...routes.map((file) => ({ path: file.repoPath, bytes: file.bytes })),
-        { path: dayPath(trip.slug, date), bytes: textBytes(body) },
+        ...routes.map((file) => ({ path: file.repoPath, text: new TextDecoder().decode(file.bytes) })),
+        { path: dayPath(trip.slug, date), text: body },
       ];
       if (cover && !trip.cover) {
-        const raw = await readTextFile(settings, trip.indexPath);
+        const raw = await readNote(trip.indexPath);
         if (raw != null) {
           const parsed = parseFrontmatter(raw);
           if (!parsed.data.cover) {
             parsed.data.cover = cover;
-            files.push({ path: trip.indexPath, bytes: textBytes(stringifyFrontmatter(parsed.data, parsed.body)) });
+            files.push({ path: trip.indexPath, text: stringifyFrontmatter(parsed.data, parsed.body) });
           }
         }
       }
-      await commit(saveDayMessage(trip.title, date), files);
+      await saveNotes(files);
       if (!trip.dayDates.includes(date)) trip.dayDates.push(date);
-      if (cover && !trip.cover) {
-        trip = { ...trip, cover };
-        if (settings.mediaWorkerUrl) {
-          await saveTripCover({
-            workerUrl: settings.mediaWorkerUrl,
-            token: settings.uploadToken || settings.token,
-            slug: trip.slug,
-            cover,
-          });
-        }
-      }
+      if (cover && !trip.cover) trip = { ...trip, cover };
       dirty = false;
       const usedCover = Boolean(cover && trip.cover === cover);
       await refreshCoverChoices();
-      const saved = routes.length ? "Saved the note and route to GitHub" : "Saved the note to GitHub";
-      setStatus(usedCover ? "Saved. That photo is the trip thumbnail." : saved);
+      setStatus(usedCover ? "Saved. That photo is the trip thumbnail." : "Saved to the travel log.");
     } catch (error) {
       dirty = true;
       setStatus(error instanceof Error ? error.message : "Save failed");
@@ -387,7 +348,7 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   async function handleFiles(files: File[]): Promise<void> {
-    if (!trip || !files.length || !settings) return;
+    if (!trip || !files.length) return;
     const photos = filenamesIn(paths, trip.slug, "photos");
     const routes = filenamesIn(paths, trip.slug, "routes");
     const prepared = [];
@@ -417,8 +378,8 @@ export function mountAuthor(root: HTMLElement): void {
       setStatus(`Uploading ${item.filename}…`);
       try {
         const url = await uploadToBucket({
-          workerUrl: settings.mediaWorkerUrl,
-          token: settings.uploadToken || settings.token,
+          workerUrl: notesTarget().workerUrl,
+          token: notesTarget().token,
           objectKey: item.objectKey,
           bytes: item.bytes,
           contentType: item.contentType,
@@ -444,7 +405,7 @@ export function mountAuthor(root: HTMLElement): void {
     if (!trips.length) {
       const empty = document.createElement("li");
       empty.className = "meta";
-      empty.textContent = "No trips on GitHub yet.";
+      empty.textContent = "No trips yet.";
       tripList.appendChild(empty);
       return;
     }
@@ -461,20 +422,19 @@ export function mountAuthor(root: HTMLElement): void {
 
   async function showList(): Promise<void> {
     show("list");
-    listStatus.textContent = "Loading trips from GitHub…";
+    listStatus.textContent = "Loading trips…";
     trip = null;
     try {
-      await refreshTip();
-      if (!settings) return;
+      await loadBucketPaths();
       const indexed = indexTrips(paths);
       const trips: RemoteTrip[] = [];
       for (const item of indexed) {
-        const raw = await readTextFile(settings, item.indexPath);
+        const raw = await readNote(item.indexPath);
         if (raw == null) continue;
         trips.push(tripFromIndex(item.slug, item.indexPath, raw, item.days));
       }
       renderList(trips);
-      listStatus.textContent = "Save on this page commits straight to GitHub.";
+      listStatus.textContent = "Save updates the travel log.";
     } catch (error) {
       listStatus.textContent = error instanceof Error ? error.message : "Could not load trips.";
     }
@@ -500,7 +460,6 @@ export function mountAuthor(root: HTMLElement): void {
     }
     settings = { token, owner, repo, branch, pagesUrl, mediaWorkerUrl, uploadToken };
     saveSettings(settings);
-    tip = null;
     paths = [];
     showSettingsError("");
     fillSettingsForm();
@@ -519,7 +478,6 @@ export function mountAuthor(root: HTMLElement): void {
   must<HTMLButtonElement>(root, "forget-token").addEventListener("click", () => {
     clearSettings();
     settings = null;
-    tip = null;
     paths = [];
     fillSettingsForm();
     show("settings");
@@ -538,10 +496,6 @@ export function mountAuthor(root: HTMLElement): void {
   createForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     createError.hidden = true;
-    if (!settings) {
-      show("settings");
-      return;
-    }
     const data = new FormData(createForm);
     const title = String(data.get("title") || "").trim();
     const slug = slugify(String(data.get("slug") || title));
@@ -559,9 +513,9 @@ export function mountAuthor(root: HTMLElement): void {
       createError.hidden = false;
       return;
     }
-    listStatus.textContent = "Creating trip on GitHub…";
+    listStatus.textContent = "Creating trip…";
     try {
-      await ensureTip();
+      await loadBucketPaths();
       if (indexTrips(paths).some((item) => item.slug === slug)) {
         throw new Error("A trip with that slug already exists.");
       }
@@ -576,9 +530,9 @@ export function mountAuthor(root: HTMLElement): void {
         },
         "",
       );
-      await commit(createTripMessage(title, date), [
-        { path: indexRepoPath(slug), bytes: textBytes(index) },
-        { path: dayRepoPath(slug, date), bytes: textBytes("\n") },
+      await saveNotes([
+        { path: indexRepoPath(slug), text: index },
+        { path: dayRepoPath(slug, date), text: "\n" },
       ]);
       location.assign(`${base}author/?trip=${encodeURIComponent(slug)}&date=${encodeURIComponent(date)}`);
     } catch (error) {
@@ -603,7 +557,7 @@ export function mountAuthor(root: HTMLElement): void {
   saveBtn.addEventListener("click", () => void saveDay());
   bodyEl.addEventListener("input", () => {
     dirty = true;
-    setStatus("Unsaved. Save sends this day to GitHub.");
+    setStatus("Unsaved. Save updates the travel log.");
   });
 
   saveCoverBtn.addEventListener("click", async () => {
@@ -618,21 +572,19 @@ export function mountAuthor(root: HTMLElement): void {
   });
 
   publishBtn.addEventListener("click", async () => {
-    if (!settings || !trip) return;
+    if (!trip) return;
     setStatus("Saving…");
     try {
-      const raw = await readTextFile(settings, trip.indexPath);
+      const raw = await readNote(trip.indexPath);
       if (raw == null) throw new Error("Could not read the trip index.");
       const nextDraft = !trip.draft;
       const parsed = parseFrontmatter(raw);
       parsed.data.draft = nextDraft;
       const index = stringifyFrontmatter(parsed.data, parsed.body);
-      await commit(`${nextDraft ? "Unpublish" : "Publish"} ${trip.title}`, [
-        { path: trip.indexPath, bytes: textBytes(index) },
-      ]);
+      await saveNotes([{ path: trip.indexPath, text: index }]);
       trip = { ...trip, draft: nextDraft };
       renderTripMeta();
-      setStatus(nextDraft ? "Hidden. The next site build will drop this trip." : "Published. The next site build will show this trip.");
+      setStatus(nextDraft ? "Hidden from the travel log." : "Showing on the travel log.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not update the trip.");
     }
@@ -687,7 +639,6 @@ export function mountAuthor(root: HTMLElement): void {
 
   fillSettingsForm();
   const initialTrip = params.get("trip") || pathSlug;
-  if (!settings) show("settings");
-  else if (initialTrip) void openTrip(initialTrip, params.get("date") || undefined);
+  if (initialTrip) void openTrip(initialTrip, params.get("date") || undefined);
   else void showList();
 }

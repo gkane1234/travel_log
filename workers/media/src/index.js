@@ -1,6 +1,7 @@
 import { AwsClient } from "aws4fetch";
 import { PUBLIC_PREFIX, isAllowedKey, isAllowedType, mediaPublicUrl, storageConfigError } from "./config.js";
 import { isTripCoverPath, renderJournal, setCoverFrontmatter } from "./journal.js";
+import { listTripNoteKeys, putTripNotes, readTripNotes } from "./notes.js";
 import { checkLogin, loginPage, mediaGate, safeNext } from "./gate.js";
 
 function json(body, status, extra = {}) {
@@ -48,6 +49,18 @@ async function authorize(request, env) {
   });
   if (response.ok) return { ok: true };
   return { ok: false, error: "GitHub rejected that token for this repository." };
+}
+
+async function canEditNotes(request, env) {
+  const session = await mediaGate(request, env);
+  if (session.ok) return { ok: true };
+  if (bearer(request)) {
+    const auth = await authorize(request, env);
+    if (auth.ok) return { ok: true };
+    return { ok: false, status: 401, error: auth.error };
+  }
+  if (session.status === 503) return { ok: false, status: 503, error: session.error };
+  return { ok: false, status: 401, error: "Sign in to edit the travel log." };
 }
 
 async function presign(env, key, contentType) {
@@ -243,9 +256,45 @@ export default {
       return json({ ok: true }, 200, { "Set-Cookie": result.cookie });
     }
 
+    if (
+      request.method === "POST" &&
+      (path === `${PUBLIC_PREFIX}/notes` ||
+        path === `${PUBLIC_PREFIX}/notes/read` ||
+        path === `${PUBLIC_PREFIX}/notes/list`)
+    ) {
+      const allowed = await canEditNotes(request, env);
+      if (!allowed.ok) return cors(json({ error: allowed.error }, allowed.status));
+      if (!env.TRIPS) return cors(json({ error: "Trip storage is not configured." }, 503));
+      if (path.endsWith("/list")) {
+        try {
+          const keys = await listTripNoteKeys(env.TRIPS);
+          return cors(json({ keys }, 200));
+        } catch {
+          return cors(json({ error: "Could not list trips." }, 502));
+        }
+      }
+      let noteBody;
+      try {
+        noteBody = await request.json();
+      } catch {
+        return cors(json({ error: "Expected a JSON body." }, 400));
+      }
+      try {
+        if (path.endsWith("/read")) {
+          const files = await readTripNotes(env.TRIPS, noteBody.paths || []);
+          return cors(json({ files }, 200));
+        }
+        const keys = await putTripNotes(env.TRIPS, noteBody.files || []);
+        return cors(json({ ok: true, keys }, 200));
+      } catch (error) {
+        const status = Number(error.status) || 400;
+        return cors(json({ error: error.message || "Could not save that note." }, status));
+      }
+    }
+
     if (request.method === "POST" && path === `${PUBLIC_PREFIX}/cover`) {
-      const auth = await authorize(request, env);
-      if (!auth.ok) return cors(json({ error: auth.error }, 401));
+      const auth = await canEditNotes(request, env);
+      if (!auth.ok) return cors(json({ error: auth.error }, auth.status || 401));
       let body;
       try {
         body = await request.json();
@@ -275,8 +324,8 @@ export default {
     const configError = storageConfigError(env);
     if (configError) return cors(json({ error: configError }, 503));
 
-    const auth = await authorize(request, env);
-    if (!auth.ok) return cors(json({ error: auth.error }, 401));
+    const auth = await canEditNotes(request, env);
+    if (!auth.ok) return cors(json({ error: auth.error }, auth.status || 401));
 
     let body;
     try {

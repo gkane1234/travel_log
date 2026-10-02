@@ -16,9 +16,9 @@ import {
   photoPathsInMarkdown,
   routeRepoPath,
 } from "../src/lib/github/commit-plan.ts";
-import { convertHeicFile, plannedMediaFilename } from "../src/lib/github/media.ts";
+import { convertHeicFile, plannedMediaFilename, prepareDroppedFile } from "../src/lib/github/media.ts";
 import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
-import { POSTER_MAX_BYTES, isPosterKey, mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
+import { POSTER_MAX_BYTES, isAllowedKey, isPosterKey, mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
 import { mediaWorkerOrigin, mediaUploadUrl } from "../src/lib/github/upload.ts";
 import { isDroppedMedia } from "../src/lib/github/drop-files.ts";
 import worker from "../workers/media/src/index.js";
@@ -217,14 +217,28 @@ assert.equal(safeNext("/travel-log/trips/olympic-peninsula/"), "/travel-log/trip
 assert.equal(safeNext("/travel-log/login"), "");
 assert.equal(safeNext("https://evil.example"), "");
 
-let failed = false;
-try {
-  await convertHeicFile(new Blob(["not a heic file"], { type: "image/heic" }));
-} catch (error) {
-  failed = true;
-  assert.match(String(error instanceof Error ? error.message : error), /Export a JPEG/);
+const heicNames = ["IMG_5407(1).HEIC", "notes.txt"];
+const heicOutcomes = [];
+for (const name of heicNames) {
+  try {
+    await prepareDroppedFile(new File(["not a heic file"], name, { type: "image/heic" }), "olympic-peninsula", new Set(), new Set());
+    heicOutcomes.push("ok");
+  } catch (error) {
+    heicOutcomes.push(error instanceof Error ? error.message : String(error));
+  }
 }
-assert.equal(failed, true);
+assert.equal(heicOutcomes.length, 2);
+assert.match(heicOutcomes[0], /Could not convert IMG_5407\(1\)\.HEIC/);
+assert.match(heicOutcomes[0], /not a HEIC photo/);
+assert.equal(heicOutcomes[0].includes("Export a JPEG"), false);
+assert.match(heicOutcomes[1], /Unsupported file: notes\.txt/);
+assert.equal(typeof convertHeicFile, "function");
+assert.equal(plannedMediaFilename("IMG_5407(1).HEIC"), "img-5407-1.jpg");
+assert.equal(plannedMediaFilename("IMG_5336(2).HEIC"), "img-5336-2.jpg");
+assert.equal(
+  isAllowedKey(mediaObjectKey("olympic-peninsula", plannedMediaFilename("IMG_5407(1).HEIC"))),
+  true,
+);
 
 assert.equal(
   mediaObjectKey("olympic-peninsula", "img-5123-2.jpg"),

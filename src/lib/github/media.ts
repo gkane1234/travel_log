@@ -19,25 +19,74 @@ export type PreparedFile = {
   contentType?: string;
 };
 
-const HEIC_ERROR =
-  "Could not convert this HEIC photo in the browser. Export a JPEG and drop that instead.";
+const HEIC_BRAND = /heic|heix|hevc|hevx|heim|heis|mif1|msf1/;
 
-export async function convertHeicFile(file: Blob): Promise<Blob> {
+function heicReason(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "";
+  const line = raw.split("\n")[0].trim();
+  if (!line) return "It is not a HEIC photo.";
+  return line.length > 180 ? `${line.slice(0, 177)}...` : line;
+}
+
+async function looksLikeHeic(file: Blob): Promise<boolean> {
+  const head = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+  if (head.length < 12) return false;
+  const box = String.fromCharCode(...head.subarray(4, 8));
+  if (box !== "ftyp") return false;
+  const brand = String.fromCharCode(...head.subarray(8, 12)).toLowerCase();
+  return HEIC_BRAND.test(brand);
+}
+
+async function jpegFromBitmap(bitmap: ImageBitmap): Promise<Blob> {
   try {
-    const mod = await import("heic2any");
-    const heic2any = mod.default as (opts: {
-      blob: Blob;
-      toType: string;
-      quality: number;
-    }) => Promise<Blob | Blob[]>;
-    const result = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
-    const blob = Array.isArray(result) ? result[0] : result;
-    if (!blob || blob.size === 0) throw new Error("empty");
-    return blob;
-  } catch (error) {
-    if (error instanceof Error && error.message === HEIC_ERROR) throw error;
-    throw new Error(HEIC_ERROR);
+    if (typeof OffscreenCanvas !== "undefined") {
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not encode this photo as JPEG.");
+      ctx.drawImage(bitmap, 0, 0);
+      const out = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.9 });
+      if (!out || out.size === 0) throw new Error("Could not encode this photo as JPEG.");
+      return out;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not encode this photo as JPEG.");
+    ctx.drawImage(bitmap, 0, 0);
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (result) => (result ? resolve(result) : reject(new Error("Could not encode this photo as JPEG."))),
+        "image/jpeg",
+        0.9,
+      );
+    });
+  } finally {
+    bitmap.close();
   }
+}
+
+/** Decode a HEIC photo with libheif, then encode a JPEG that has no EXIF. */
+export async function convertHeicFile(file: Blob): Promise<Blob> {
+  if (!(await looksLikeHeic(file))) {
+    throw new Error("It is not a HEIC photo.");
+  }
+  const { heicTo } = await import("heic-to");
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await heicTo({
+      blob: file,
+      type: "bitmap",
+      options: { imageOrientation: "from-image" },
+    });
+  } catch (error) {
+    throw new Error(heicReason(error));
+  }
+  if (!bitmap || bitmap.width < 1 || bitmap.height < 1) {
+    bitmap?.close();
+    throw new Error("It is not a HEIC photo.");
+  }
+  return jpegFromBitmap(bitmap);
 }
 
 async function gpxFromZip(bytes: ArrayBuffer): Promise<{ name: string; data: Uint8Array }> {
@@ -111,7 +160,13 @@ export async function prepareDroppedFile(
   }
 
   if (ext === ".heic" || ext === ".heif") {
-    const jpeg = await convertHeicFile(file);
+    let jpeg: Blob;
+    try {
+      jpeg = await convertHeicFile(file);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "It is not a HEIC photo.";
+      throw new Error(`Could not convert ${file.name}. ${reason}`);
+    }
     const clean = await reencodePhoto(jpeg);
     const base = sanitizeBasename(file.name);
     const filename = uniqueFilename(photos, base, ".jpg");

@@ -185,22 +185,40 @@ export function motionMarkup(model) {
     while (activeLoads < FLOAT_LOADERS && loadQueue.length) {
       const job = loadQueue.shift();
       activeLoads += 1;
-      const finish = () => {
+      let settled = false;
+      const release = () => {
+        if (settled) return;
+        settled = true;
         activeLoads -= 1;
-        job.ready();
         pumpLoads();
       };
-      job.img.addEventListener("load", finish);
-      job.img.addEventListener("error", finish);
+      job.img.addEventListener("error", () => {
+        if (job.failed) job.failed();
+        release();
+      });
+      job.img.addEventListener("load", () => {
+        const decoded = typeof job.img.decode === "function" ? job.img.decode() : Promise.resolve();
+        decoded.then(() => {
+          if (!(job.img.naturalWidth > 0)) {
+            if (job.failed) job.failed();
+            release();
+            return;
+          }
+          if (job.show) job.show();
+          release();
+        }, () => {
+          if (job.failed) job.failed();
+          release();
+        });
+      });
       job.img.src = job.url;
     }
   }
-  function enqueueLoad(img, url, ready) {
-    loadQueue.push({ img, url, ready: ready || function () {} });
+  function enqueueLoad(img, url) {
+    loadQueue.push({ img, url });
     pumpLoads();
   }
-  function spawn(now) {
-    spawnAt = now + Math.max(0.3, settings.spawn) * 1000;
+  function queueFloat() {
     const maxPhotos = Math.max(1, Math.round(settings.maxPhotos));
     if (!photos.length || floats.length + floatPending >= maxPhotos) return;
     floatPending += 1;
@@ -213,18 +231,25 @@ export function motionMarkup(model) {
     img.style.left = (8 + Math.random() * 70) + "%";
     img.style.top = (8 + Math.random() * 70) + "%";
     const url = photos[Math.floor(Math.random() * photos.length)];
-    const job = {
+    loadQueue.unshift({
       img,
       url,
-      ready() {
+      show() {
         floatPending -= 1;
-        if (!img.naturalWidth || floats.length >= Math.max(1, Math.round(settings.maxPhotos))) return;
-        if (!img.isConnected) layer.append(img);
+        if (floats.length >= Math.max(1, Math.round(settings.maxPhotos))) return;
+        layer.append(img);
         floats.push({ el: img, born: performance.now(), angle });
       },
-    };
-    loadQueue.unshift(job);
+      failed() {
+        floatPending -= 1;
+        queueFloat();
+      },
+    });
     pumpLoads();
+  }
+  function spawn(now) {
+    spawnAt = now + Math.max(0.3, settings.spawn) * 1000;
+    queueFloat();
   }
   let last = performance.now();
   function tick(now) {

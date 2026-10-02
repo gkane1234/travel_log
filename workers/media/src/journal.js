@@ -111,8 +111,10 @@ function page(title, main, motion) {
     body { margin: 0; }
     a { color: #2e4a3e; }
     #motion-names, #motion-layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
-    .name-card { position: absolute; top: 0; left: 0; display: flex; gap: 0.55rem; align-items: center; width: max-content; max-width: 16rem; padding: 0.35rem 0.6rem 0.35rem 0.35rem; background: rgba(243, 239, 230, 0.72); border-radius: 999px; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
+    .name-card { position: absolute; top: 0; left: 0; display: flex; gap: 0.55rem; align-items: center; width: max-content; max-width: 16rem; padding: 0.35rem 0.7rem 0.35rem 0.35rem; background: rgba(243, 239, 230, 0.72); border-radius: 999px; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
     .name-card img { width: 3.2rem; height: 2.4rem; object-fit: cover; border-radius: 999px; margin: 0; }
+    .name-card span { display: grid; line-height: 1.2; }
+    .name-card em { font-style: normal; font-size: 0.75rem; opacity: 0.8; }
     .float-photo { position: absolute; height: auto; margin: 0; border-radius: 8px; box-shadow: 0 8px 24px rgba(28, 36, 30, 0.18); }
     #motion-debug { position: fixed; right: 0.8rem; bottom: 0.8rem; z-index: 5; width: min(18rem, calc(100% - 1.6rem)); padding: 0.7rem 0.8rem; background: rgba(28, 36, 30, 0.92); color: #f3efe6; font-family: "Segoe UI", sans-serif; font-size: 0.82rem; border-radius: 8px; }
     #motion-debug .debug-bar { display: flex; justify-content: space-between; align-items: center; }
@@ -133,6 +135,15 @@ function page(title, main, motion) {
     .trip-list a { display: flex; gap: 0.9rem; align-items: center; padding: 0.8rem 0; border-top: 1px solid #cfc5b4; text-decoration: none; color: inherit; }
     .trip-list h2, .trip-list p { margin: 0.15rem 0; }
     .day { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #cfc5b4; }
+    .gallery { margin: 0.4rem 0 1.4rem; }
+    .gallery h2 { font-size: 1.05rem; margin: 0.6rem 0; }
+    .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 0.45rem; }
+    .gallery-item { display: block; width: 100%; margin: 0; padding: 0; border: 0; background: #e4ddd0; cursor: pointer; aspect-ratio: 4 / 3; overflow: hidden; }
+    .gallery-item img, .gallery-item video { width: 100%; height: 100%; object-fit: cover; margin: 0; pointer-events: none; }
+    #lightbox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(28, 36, 30, 0.9); }
+    #lightbox[hidden] { display: none; }
+    #lightbox img, #lightbox video { max-width: min(92vw, 64rem); max-height: 86vh; margin: 0; }
+    #lightbox-close { position: absolute; top: 0.8rem; right: 0.8rem; font: inherit; padding: 0.35rem 0.7rem; background: #f3efe6; color: #1c241e; border: 0; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -226,7 +237,6 @@ export async function publicTripCards(bucket) {
   const cards = [];
   for (const trip of trips) {
     const posterKeys = (await listKeys(bucket, `posters/${trip.slug}/`)).filter((key) => isPosterKey(key)).slice(0, 16);
-    if (!posterKeys.length) continue;
     cards.push({
       title: trip.title,
       location: trip.location,
@@ -239,9 +249,105 @@ export async function publicTripCards(bucket) {
 
 function motionModel(catalog) {
   return {
-    trips: catalog.trips.map((trip) => ({ title: trip.title, thumb: trip.thumb })),
+    trips: catalog.trips.map((trip) => ({ title: trip.title, when: trip.when, thumb: trip.thumb || "" })),
     photos: catalog.photos,
   };
+}
+
+const GALLERY_FILE = /\.(jpe?g|png|gif|webp|mp4|webm|mov)$/i;
+const VIDEO_FILE = /\.(mp4|webm|mov)$/i;
+
+function galleryItemFromSrc(src) {
+  const value = String(src || "").trim().split(/[?#]/)[0];
+  const tripMedia = value.match(/\/trip-media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/);
+  const direct = value.match(/\/media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/);
+  const slug = tripMedia?.[1] || direct?.[1] || "";
+  const filename = tripMedia?.[2] || direct?.[2] || "";
+  if (!slug || !filename || !GALLERY_FILE.test(filename)) return null;
+  return {
+    url: `${PREFIX}/media/${slug}/photos/${filename}`,
+    kind: VIDEO_FILE.test(filename) ? "video" : "photo",
+  };
+}
+
+function mediaInMarkdown(raw) {
+  const body = parseFrontmatter(raw).body;
+  const items = [];
+  for (const match of body.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+    const item = galleryItemFromSrc(match[1]);
+    if (item) items.push(item);
+  }
+  for (const match of body.matchAll(/<TripVideo\s+src="([^"]+)"\s*\/?\s*>/g)) {
+    const item = galleryItemFromSrc(match[1]);
+    if (item) items.push(item);
+  }
+  return items;
+}
+
+async function tripGallery(bucket, slug, notes) {
+  const items = [];
+  const seen = new Set();
+  const add = (item) => {
+    if (!item || seen.has(item.url)) return;
+    seen.add(item.url);
+    items.push(item);
+  };
+  for (const raw of notes) {
+    for (const item of mediaInMarkdown(raw)) add(item);
+  }
+  const keys = (await listKeys(bucket, `media/${slug}/photos/`)).filter((key) => GALLERY_FILE.test(key)).sort();
+  for (const key of keys) {
+    const filename = key.split("/").pop();
+    add({
+      url: `${PREFIX}/${key}`,
+      kind: VIDEO_FILE.test(filename) ? "video" : "photo",
+    });
+  }
+  return items;
+}
+
+function galleryMarkup(items) {
+  if (!items.length) return "";
+  const tiles = items
+    .map((item) => {
+      const src = escapeHtml(item.url);
+      if (item.kind === "video") {
+        return `<button type="button" class="gallery-item" data-kind="video" data-src="${src}"><video src="${src}" muted playsinline preload="metadata"></video></button>`;
+      }
+      return `<button type="button" class="gallery-item" data-kind="photo" data-src="${src}"><img src="${src}" alt="" /></button>`;
+    })
+    .join("");
+  return `<section class="gallery" aria-label="Photos and videos"><h2>Photos and videos</h2><div class="gallery-grid">${tiles}</div></section>
+<div id="lightbox" hidden><button type="button" id="lightbox-close">Close</button><div id="lightbox-frame"></div></div>
+<script>
+(() => {
+  const box = document.getElementById("lightbox");
+  const frame = document.getElementById("lightbox-frame");
+  document.getElementById("lightbox-close").addEventListener("click", shut);
+  box.addEventListener("click", (event) => { if (event.target === box) shut(); });
+  function shut() { box.hidden = true; frame.replaceChildren(); }
+  document.querySelectorAll(".gallery-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      frame.replaceChildren();
+      const src = button.dataset.src || "";
+      if (button.dataset.kind === "video") {
+        const video = document.createElement("video");
+        video.controls = true;
+        video.playsInline = true;
+        video.autoplay = true;
+        video.src = src;
+        frame.append(video);
+      } else {
+        const img = document.createElement("img");
+        img.alt = "";
+        img.src = src;
+        frame.append(img);
+      }
+      box.hidden = false;
+    });
+  });
+})();
+</script>`;
 }
 
 function formatRange(start, end) {
@@ -264,34 +370,48 @@ export async function renderJournal(bucket, url) {
     const keys = await listKeys(bucket, "trips/");
     const indexes = keys.filter((key) => key.endsWith("/index.md"));
     const trips = [];
+    const outings = [];
     for (const key of indexes) {
       const raw = await readText(bucket, key);
       if (!raw) continue;
       const { data } = parseFrontmatter(raw);
       if (String(data.draft) === "true") continue;
       const slug = key.split("/")[1];
-      trips.push({
+      const trip = {
         slug,
         title: data.title || slug,
         location: data.location || "",
         date: data.date || "",
         endDate: data.endDate || "",
         summary: data.summary || "",
+        kind: data.kind || "",
         thumb: await tripThumbnail(bucket, slug, data),
-      });
+      };
+      if (trip.kind === "outing") outings.push(trip);
+      else trips.push(trip);
     }
-    trips.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    if (!trips.length) return null;
-    const items = trips
-      .map((trip) => {
-        const when = formatRange(trip.date, trip.endDate);
-        const where = [trip.location, when].filter(Boolean).join(" · ");
-        const thumb = trip.thumb ? `<img class="thumb" src="${escapeHtml(trip.thumb)}" alt="" />` : "";
-        return `<li><a href="${PREFIX}/trips/${encodeURIComponent(trip.slug)}/">${thumb}<span><h2>${escapeHtml(trip.title)}</h2><p class="meta">${escapeHtml(where)}</p>${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}</span></a></li>`;
-      })
-      .join("");
+    const byDate = (a, b) => String(b.date).localeCompare(String(a.date));
+    trips.sort(byDate);
+    outings.sort(byDate);
+    if (!trips.length && !outings.length) return null;
+    const listMarkup = (list) => {
+      if (!list.length) return `<p class="meta">None yet.</p>`;
+      const items = list
+        .map((trip) => {
+          const when = formatRange(trip.date, trip.endDate);
+          const where = [trip.location, when].filter(Boolean).join(" · ");
+          const thumb = trip.thumb ? `<img class="thumb" src="${escapeHtml(trip.thumb)}" alt="" />` : "";
+          return `<li><a href="${PREFIX}/trips/${encodeURIComponent(trip.slug)}/">${thumb}<span><h2>${escapeHtml(trip.title)}</h2><p class="meta">${escapeHtml(where)}</p>${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}</span></a></li>`;
+        })
+        .join("");
+      return `<ul class="trip-list">${items}</ul>`;
+    };
     const motion = motionModel(await tripCatalog(bucket));
-    return page("Travel Log", `<h1>Travel Log</h1><p class="meta">Trips we've taken together.</p><ul class="trip-list">${items}</ul>`, motion);
+    return page(
+      "Travel Log",
+      `<h1>Travel Log</h1><h2>Trips</h2>${listMarkup(trips)}<h2>Day trips</h2>${listMarkup(outings)}`,
+      motion,
+    );
   }
 
   const slug = path.slice(`${PREFIX}/trips/`.length).split("/")[0];
@@ -300,23 +420,17 @@ export async function renderJournal(bucket, url) {
   if (!indexRaw) return null;
   const { data, body } = parseFrontmatter(indexRaw);
   const keys = await listKeys(bucket, `trips/${slug}/days/`);
+  const dayNotes = [];
   const days = [];
-  let notedPhoto = "";
   for (const key of keys.filter((item) => /\.(md|mdx)$/.test(item)).sort()) {
     const raw = await readText(bucket, key);
     if (!raw) continue;
-    if (!notedPhoto) notedPhoto = firstPhotoInMarkdown(raw);
+    dayNotes.push(raw);
     const date = key.split("/").pop().replace(/\.(md|mdx)$/, "");
     days.push(`<section class="day"><h2>${escapeHtml(date)}</h2>${renderBody(raw)}</section>`);
   }
   const when = formatRange(data.date, data.endDate);
   const where = [data.location, when].filter(Boolean).join(" · ");
-  let thumb = gatedPhotoUrl(data.cover || "") || notedPhoto;
-  if (!thumb) {
-    const mediaKeys = (await listKeys(bucket, `media/${slug}/`)).filter((key) => isImageFile(key)).sort();
-    thumb = mediaKeys[0] ? `${PREFIX}/${mediaKeys[0]}` : "";
-  }
-  const cover = thumb ? `<img class="cover" src="${escapeHtml(thumb)}" alt="" />` : "";
-  const motion = motionModel(await tripCatalog(bucket));
-  return page(data.title || slug, `<p class="meta"><a href="${PREFIX}/">Trips</a></p><h1>${escapeHtml(data.title || slug)}</h1>${cover}<p class="meta">${escapeHtml(where)}</p>${renderBody(body)}${days.join("")}`, motion);
+  const gallery = galleryMarkup(await tripGallery(bucket, slug, [body, ...dayNotes]));
+  return page(data.title || slug, `<p class="meta"><a href="${PREFIX}/">Trips</a></p><h1>${escapeHtml(data.title || slug)}</h1><p class="meta">${escapeHtml(where)}</p>${gallery}${renderBody(body)}${days.join("")}`);
 }

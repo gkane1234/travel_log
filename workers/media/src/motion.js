@@ -23,9 +23,11 @@ export function posterStage(cards) {
   const tiles = [];
   for (const card of cards) {
     const caption = [card.location, card.when].filter(Boolean).join(" · ");
-    for (const src of card.posters || []) {
+    const sources = card.posters?.length ? card.posters : [""];
+    for (const src of sources) {
+      const image = src ? `<img src="${escapeAttr(src)}" alt="" />` : "";
       tiles.push(
-        `<figure class="poster"><img src="${escapeAttr(src)}" alt="" /><figcaption><strong>${escapeAttr(card.title || "")}</strong><span>${escapeAttr(caption)}</span></figcaption></figure>`,
+        `<figure class="poster">${image}<figcaption><strong>${escapeAttr(card.title || "")}</strong><span>${escapeAttr(caption)}</span></figcaption></figure>`,
       );
     }
   }
@@ -151,7 +153,14 @@ export function motionMarkup(model) {
         card.append(img);
       }
       const label = document.createElement("span");
-      label.textContent = trip.title || "Trip";
+      const title = document.createElement("strong");
+      title.textContent = trip.title || "Trip";
+      label.append(title);
+      if (trip.when) {
+        const dates = document.createElement("em");
+        dates.textContent = trip.when;
+        label.append(dates);
+      }
       card.append(label);
       names.append(card);
       const angle = Math.random() * Math.PI * 2;

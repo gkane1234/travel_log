@@ -73,6 +73,11 @@ const { slug = "" } = Astro.props;
 
     <form id="create-form" class="author-form">
       <h2>New trip</h2>
+      <div class="kind-choice">
+        <span>Kind</span>
+        <label><input type="radio" name="kind" value="trip" checked /> Trip</label>
+        <label><input type="radio" name="kind" value="outing" /> Day trip</label>
+      </div>
       <label>
         Title
         <input name="title" required placeholder="Olympic Peninsula" />
@@ -91,6 +96,7 @@ const { slug = "" } = Astro.props;
           <input name="endDate" type="date" />
         </label>
       </div>
+      <p class="meta">A day trip only needs a start date. Leave the end date blank, or set it to the same day.</p>
       <label>
         Location
         <input name="location" placeholder="Washington" />
@@ -221,6 +227,21 @@ const { slug = "" } = Astro.props;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
+  }
+  .kind-choice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.2rem;
+    align-items: center;
+    font-family: var(--font-ui);
+    font-size: 0.88rem;
+  }
+  .kind-choice label {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35rem;
+    width: auto;
   }
   button,
   .file-btn {

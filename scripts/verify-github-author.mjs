@@ -220,6 +220,21 @@ const files = new Map([
     "trips/example-trip/index.md",
     "---\ntitle: Example Trip\ndate: 2024-08-12\ndraft: false\n---\n",
   ],
+  [
+    "trips/cabin-weekend/index.md",
+    "---\ntitle: Cabin Weekend\ndate: 2026-10-02\nendDate: 2026-10-04\ndraft: false\n---\n",
+  ],
+  [
+    "trips/ferry-ride/index.md",
+    "---\ntitle: Ferry Ride\ndate: 2026-07-04\nkind: outing\ndraft: false\n---\n",
+  ],
+  [
+    "trips/secret-draft/index.md",
+    "---\ntitle: Secret Draft\ndate: 2026-11-01\ndraft: true\n---\n",
+  ],
+  ["media/olympic-peninsula/photos/clip.mp4", ""],
+  ["media/olympic-peninsula/photos/shore.gpx", ""],
+  ["media/olympic-peninsula/routes/shoreline.gpx", ""],
 ]);
 const bucket = {
   async list({ prefix }) {
@@ -243,11 +258,37 @@ assert.match(homeHtml, /Travel distance \(% of screen\)/);
 assert.match(homeHtml, /pointer-events: none/);
 assert.match(homeHtml, /\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg/);
 assert.match(homeHtml, /<img class="thumb" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg" alt="" \/>/);
+assert.match(homeHtml, /<h2>Trips<\/h2>/);
+assert.match(homeHtml, /<h2>Day trips<\/h2>/);
+const listHtml = homeHtml.slice(homeHtml.indexOf("<h1>Travel Log</h1>"));
+const tripsHead = listHtml.indexOf("<h2>Trips</h2>");
+const dayHead = listHtml.indexOf("<h2>Day trips</h2>");
+const cabinAt = listHtml.indexOf("Cabin Weekend");
+const ferryAt = listHtml.indexOf("Ferry Ride");
+assert.ok(tripsHead !== -1 && dayHead !== -1 && tripsHead < cabinAt && cabinAt < dayHead && dayHead < ferryAt);
+assert.match(homeHtml, /Oct 2, 2026/);
+assert.match(homeHtml, /Oct 4, 2026/);
+assert.match(homeHtml, /Jul 4, 2026/);
+assert.equal(homeHtml.includes("Secret Draft"), false);
+assert.match(homeHtml, /"title":"Ferry Ride","when":"Jul 4, 2026","thumb":""/);
+assert.match(homeHtml, /"title":"Example Trip","when":"Aug 12, 2024","thumb":""/);
+assert.match(homeHtml, /Sep 5, 2026/);
+assert.match(homeHtml, /Sep 12, 2026/);
+assert.match(homeHtml, /id="motion-layer"/);
 assert.equal(homeHtml.includes("r2.dev"), false);
 assert.equal(homeHtml.includes("example-trip") && homeHtml.includes("<img"), true);
 const tripPage = await renderJournal(bucket, new URL("https://gabriel-kane.com/travel-log/trips/olympic-peninsula"));
 const tripHtml = await tripPage.text();
-assert.match(tripHtml, /<img class="cover" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
+const galleryAt = tripHtml.indexOf('class="gallery"');
+const dayAt = tripHtml.indexOf('class="day"');
+assert.ok(galleryAt !== -1 && dayAt !== -1 && galleryAt < dayAt);
+assert.match(tripHtml, /class="gallery-item" data-kind="photo" data-src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
+assert.match(tripHtml, /class="gallery-item" data-kind="video" data-src="\/travel-log\/media\/olympic-peninsula\/photos\/clip\.mp4"/);
+assert.equal(tripHtml.includes("shore.gpx"), false);
+assert.equal(tripHtml.includes("shoreline.gpx"), false);
+assert.match(tripHtml, /id="lightbox"/);
+assert.equal(tripHtml.includes('id="motion-layer"'), false);
+assert.equal(tripHtml.includes('id="motion-debug"'), false);
 
 files.set(
   "trips/olympic-peninsula/index.md",
@@ -286,7 +327,10 @@ await assert.rejects(() => putTripNotes(writable, [{ path: "trips/coast/photos/a
 const coastHome = await renderJournal(writable, new URL("https://gabriel-kane.com/travel-log/"));
 assert.match(await coastHome.text(), /Coast Walk/);
 const coastPage = await renderJournal(writable, new URL("https://gabriel-kane.com/travel-log/trips/coast"));
-assert.match(await coastPage.text(), /Saw a heron/);
+const coastHtml = await coastPage.text();
+assert.match(coastHtml, /Saw a heron/);
+assert.equal(coastHtml.includes('class="gallery"'), false);
+assert.equal(coastHtml.includes('id="motion-layer"'), false);
 
 assert.equal(isPosterKey("posters/olympic-peninsula/img-5123-2.jpg"), true);
 assert.equal(isPosterKey("media/olympic-peninsula/photos/img-5123-2.jpg"), false);
@@ -296,8 +340,13 @@ assert.equal(POSTER_MAX_BYTES, 120 * 1024);
 files.set("posters/olympic-peninsula/img-5123-2.jpg", "");
 files.set("posters/olympic-peninsula/notes.txt", "private day text");
 const cards = await publicTripCards(bucket);
-assert.equal(cards.length, 1);
-assert.deepEqual(cards[0].posters, ["/travel-log/posters/olympic-peninsula/img-5123-2.jpg"]);
+const olympicCard = cards.find((card) => card.title === "Olympic Peninsula");
+const exampleCard = cards.find((card) => card.title === "Example Trip");
+assert.ok(olympicCard);
+assert.deepEqual(olympicCard.posters, ["/travel-log/posters/olympic-peninsula/img-5123-2.jpg"]);
+assert.ok(exampleCard);
+assert.deepEqual(exampleCard.posters, []);
+assert.match(exampleCard.when, /Aug 12, 2024/);
 assert.equal(JSON.stringify(cards).includes("/travel-log/media/"), false);
 assert.equal(JSON.stringify(cards).includes("private day text"), false);
 const loginHtml = await (await loginPage("", "Wrong username or password.", posterStage(cards))).text();
@@ -329,6 +378,9 @@ assert.deepEqual(
 const authorMarkup = readFileSync(new URL("../src/components/AuthorApp.astro", import.meta.url), "utf8");
 assert.match(authorMarkup, /id="media-input"[^>]*multiple/);
 assert.match(authorMarkup, /id="create-media"[^>]*multiple/);
+assert.match(authorMarkup, /name="kind" value="trip"/);
+assert.match(authorMarkup, /name="kind" value="outing"/);
+assert.match(authorMarkup, /Day trip/);
 assert.match(authorMarkup, /id="media-pool"/);
 const authorUi = readFileSync(new URL("../src/lib/github/author-ui.ts", import.meta.url), "utf8");
 assert.match(authorUi, /gatedMediaUrl\(trip\.slug, item\.filename\)/);
@@ -336,6 +388,8 @@ assert.match(authorUi, /img\.src = src/);
 assert.match(authorUi, /video\.src = src/);
 assert.match(authorUi, /placedImageMarkdown/);
 assert.match(authorUi, /placedVideoMarkdown/);
+assert.match(authorUi, /draft: false/);
+assert.match(authorUi, /kind: kind \|\| undefined/);
 const preview = `<img src="${gatedMediaUrl("olympic-peninsula", "img-5123-2.jpg")}" alt="img-5123-2.jpg" />`;
 assert.match(preview, /src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
 assert.equal(preview.includes("r2.dev"), false);

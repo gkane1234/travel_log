@@ -607,7 +607,8 @@ export function mountAuthor(root: HTMLElement): void {
       const li = document.createElement("li");
       const link = document.createElement("a");
       link.href = `${base}author/?trip=${encodeURIComponent(item.slug)}&date=${encodeURIComponent(item.date)}`;
-      link.textContent = `${item.title} (${item.date}${item.endDate ? ` – ${item.endDate}` : ""})`;
+      const kindLabel = item.kind === "outing" ? " · Day trip" : "";
+      link.textContent = `${item.title} (${item.date}${item.endDate ? ` – ${item.endDate}` : ""})${kindLabel}`;
       li.appendChild(link);
       tripList.appendChild(li);
     }
@@ -696,6 +697,7 @@ export function mountAuthor(root: HTMLElement): void {
     const endDate = String(data.get("endDate") || "");
     const locationName = String(data.get("location") || "").trim();
     const summary = String(data.get("summary") || "").trim();
+    const kind = String(data.get("kind") || "trip") === "outing" ? "outing" : "";
     if (!title || !slug || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       createError.textContent = "Title and start date are required.";
       createError.hidden = false;
@@ -719,7 +721,8 @@ export function mountAuthor(root: HTMLElement): void {
           endDate: endDate || undefined,
           location: locationName || undefined,
           summary: summary || undefined,
-          draft: true,
+          kind: kind || undefined,
+          draft: false,
         },
         "",
       );

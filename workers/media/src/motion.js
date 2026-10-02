@@ -82,7 +82,7 @@ export function posterStage(cards) {
 
 export function motionMarkup(model) {
   const payload = JSON.stringify(model).replace(/</g, "\\u003c");
-  return `<div id="motion-names" aria-hidden="true"></div>
+  const chrome = `<div id="motion-names" aria-hidden="true"></div>
 <div id="motion-layer" aria-hidden="true"></div>
 <aside id="motion-debug">
   <div class="debug-bar"><strong>Motion</strong><button type="button" id="motion-toggle">Hide</button></div>
@@ -101,8 +101,8 @@ export function motionMarkup(model) {
     ${field("posterOpacity", "Login poster opacity", 0.05, 1, 0.05)}
   </form>
   <p class="debug-note">Poster size and opacity show on the login page after a refresh. These values stay in this browser.</p>
-</aside>
-<script type="application/json" id="motion-data">${payload}</script>
+</aside>`;
+  const script = `<script type="application/json" id="motion-data">${payload}</script>
 <script>
 (() => {
   const KEY = ${JSON.stringify(SETTINGS_KEY)};
@@ -110,6 +110,10 @@ export function motionMarkup(model) {
   const data = JSON.parse(document.getElementById("motion-data").textContent || "{}");
   const photos = Array.isArray(data.photos) ? data.photos : [];
   const trips = Array.isArray(data.trips) ? data.trips : [];
+  const FLOAT_LOADERS = 3;
+  let activeLoads = 0;
+  let floatPending = 0;
+  const loadQueue = [];
   const names = document.getElementById("motion-names");
   const layer = document.getElementById("motion-layer");
   const form = document.getElementById("motion-form");
@@ -148,9 +152,10 @@ export function motionMarkup(model) {
       card.className = "name-card";
       if (trip.thumb) {
         const img = document.createElement("img");
-        img.src = trip.thumb;
         img.alt = "";
+        img.decoding = "async";
         card.append(img);
+        enqueueLoad(img, trip.thumb);
       }
       const label = document.createElement("span");
       const title = document.createElement("strong");
@@ -176,20 +181,50 @@ export function motionMarkup(model) {
       gone.el.remove();
     }
   }
+  function pumpLoads() {
+    while (activeLoads < FLOAT_LOADERS && loadQueue.length) {
+      const job = loadQueue.shift();
+      activeLoads += 1;
+      const finish = () => {
+        activeLoads -= 1;
+        job.ready();
+        pumpLoads();
+      };
+      job.img.addEventListener("load", finish);
+      job.img.addEventListener("error", finish);
+      job.img.src = job.url;
+    }
+  }
+  function enqueueLoad(img, url, ready) {
+    loadQueue.push({ img, url, ready: ready || function () {} });
+    pumpLoads();
+  }
   function spawn(now) {
     spawnAt = now + Math.max(0.3, settings.spawn) * 1000;
     const maxPhotos = Math.max(1, Math.round(settings.maxPhotos));
-    if (!photos.length || floats.length >= maxPhotos) return;
+    if (!photos.length || floats.length + floatPending >= maxPhotos) return;
+    floatPending += 1;
     const img = document.createElement("img");
     img.className = "float-photo";
     img.alt = "";
-    img.src = photos[Math.floor(Math.random() * photos.length)];
+    img.decoding = "async";
     img.style.opacity = "0";
     const angle = Math.random() * Math.PI * 2;
     img.style.left = (8 + Math.random() * 70) + "%";
     img.style.top = (8 + Math.random() * 70) + "%";
-    layer.append(img);
-    floats.push({ el: img, born: now, angle });
+    const url = photos[Math.floor(Math.random() * photos.length)];
+    const job = {
+      img,
+      url,
+      ready() {
+        floatPending -= 1;
+        if (!img.naturalWidth || floats.length >= Math.max(1, Math.round(settings.maxPhotos))) return;
+        if (!img.isConnected) layer.append(img);
+        floats.push({ el: img, born: performance.now(), angle });
+      },
+    };
+    loadQueue.unshift(job);
+    pumpLoads();
   }
   let last = performance.now();
   function tick(now) {
@@ -230,11 +265,13 @@ export function motionMarkup(model) {
     if (now >= spawnAt) spawn(now);
     requestAnimationFrame(tick);
   }
+  if (!document.querySelector(".trip-list")) return;
   syncCards();
   requestAnimationFrame(tick);
   panel.hidden = false;
 })();
 </script>`;
+  return { chrome, script };
 }
 
 function escapeAttr(value) {

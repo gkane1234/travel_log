@@ -106,6 +106,7 @@ function renderBody(raw) {
 }
 
 function page(title, main, motion) {
+  const motionHtml = motion ? motionMarkup(motion) : null;
   return new Response(
     `<!doctype html>
 <html lang="en">
@@ -174,12 +175,13 @@ function page(title, main, motion) {
   </style>
 </head>
 <body>
-  ${motion ? motionMarkup(motion) : ""}
+  ${motionHtml ? motionHtml.chrome : ""}
   <header>
     <a href="${PREFIX}/">Travel Log</a>
     <a href="${PREFIX}/author/">Author</a>
   </header>
   <main>${main}</main>
+  ${motionHtml ? motionHtml.script : ""}
 </body>
 </html>`,
     { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-store" } },
@@ -831,7 +833,7 @@ export async function renderJournal(bucket, url) {
         .map((trip) => {
           const when = formatRange(trip.date, trip.endDate);
           const where = [trip.location, when].filter(Boolean).join(" · ");
-          const thumb = trip.thumb ? `<img class="thumb" src="${escapeHtml(trip.thumb)}" alt="" />` : "";
+          const thumb = trip.thumb ? `<img class="thumb" src="${escapeHtml(trip.thumb)}" alt="" decoding="async" />` : "";
           return `<li><a href="${PREFIX}/trips/${encodeURIComponent(trip.slug)}/">${thumb}<span><h2>${escapeHtml(trip.title)}</h2><p class="meta">${escapeHtml(where)}</p>${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}</span></a></li>`;
         })
         .join("");

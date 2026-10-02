@@ -331,7 +331,13 @@ assert.match(homeHtml, /\/travel-log\/media\/olympic-peninsula\/photos\/gallery-
 assert.match(homeHtml, /\/travel-log\/media\/example-trip\/photos\/pier\.jpg/);
 assert.equal(homeHtml.includes("/travel-log/media/example-trip/photos/clip.mp4"), false);
 assert.equal(homeHtml.includes("hidden.jpg"), false);
-assert.match(homeHtml, /<img class="thumb" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg" alt="" \/>/);
+assert.match(homeHtml, /<img class="thumb" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg" alt="" decoding="async" \/>/);
+assert.equal(/<img[^>]*gallery-only\.jpg/.test(homeHtml), false);
+assert.equal(homeHtml.includes('class="float-photo"'), false);
+const tripsHeading = homeHtml.indexOf("<h2>Trips</h2>");
+const loaderAt = homeHtml.indexOf("FLOAT_LOADERS = 3");
+assert.ok(tripsHeading !== -1 && loaderAt > tripsHeading);
+assert.match(homeHtml, /activeLoads < FLOAT_LOADERS/);
 assert.match(homeHtml, /<h2>Trips<\/h2>/);
 assert.match(homeHtml, /<h2>Day trips<\/h2>/);
 const listHtml = homeHtml.slice(homeHtml.indexOf("<h1>Travel Log</h1>"));
@@ -383,6 +389,7 @@ assert.equal(tripHtml.includes("shore.gpx"), false);
 assert.equal(tripHtml.includes("shoreline.gpx"), false);
 assert.match(tripHtml, /id="lightbox"/);
 assert.equal(tripHtml.includes('id="motion-layer"'), false);
+assert.equal(tripHtml.includes("FLOAT_LOADERS"), false);
 assert.equal(tripHtml.includes('id="motion-debug"'), false);
 assert.equal(homeHtml.includes('id="gallery-add"'), false);
 

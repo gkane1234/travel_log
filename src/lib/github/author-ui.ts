@@ -98,9 +98,6 @@ export function mountAuthor(root: HTMLElement): void {
   const coverClose = must<HTMLButtonElement>(root, "cover-close");
   const coverSummary = must<HTMLElement>(root, "cover-summary");
   const saveCoverBtn = must<HTMLButtonElement>(root, "save-cover");
-  const addPhotosToggle = must<HTMLButtonElement>(root, "add-photos-toggle");
-  const addPhotosPanel = must<HTMLElement>(root, "add-photos-panel");
-  const addPhotosClose = must<HTMLButtonElement>(root, "add-photos-close");
   const addDrop = must<HTMLElement>(root, "add-drop");
   const addedPhotosToggle = must<HTMLButtonElement>(root, "added-photos-toggle");
   const addedPhotos = must<HTMLElement>(root, "added-photos");
@@ -257,11 +254,6 @@ export function mountAuthor(root: HTMLElement): void {
   function setCoverOpen(open: boolean): void {
     coverPanel.hidden = !open;
     coverToggle.setAttribute("aria-expanded", open ? "true" : "false");
-  }
-
-  function setAddOpen(open: boolean): void {
-    addPhotosPanel.hidden = !open;
-    addPhotosToggle.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
   function closePhotoPreview(): void {
@@ -529,7 +521,6 @@ export function mountAuthor(root: HTMLElement): void {
     show("editor");
     poolItems = [];
     setCoverOpen(false);
-    setAddOpen(false);
     setAddedOpen(false);
     renderPool();
     setStatus("Loading…");
@@ -658,7 +649,6 @@ export function mountAuthor(root: HTMLElement): void {
       return;
     }
     uploading = true;
-    setAddOpen(true);
     const progress = beginUploadList(uploadList, uploadTemplate, files);
     try {
     const photos = knownMediaNames();
@@ -785,7 +775,7 @@ export function mountAuthor(root: HTMLElement): void {
       const noun = uploaded === 1 ? "file" : "files";
       const poster = posterWarning ? ` Login poster failed: ${posterWarning}` : "";
       const skippedText = skipNote ? ` ${skipNote}` : "";
-      setStatus(`Uploaded ${uploaded} ${noun}. Open Added photos, then drag one onto the day.${poster}${skippedText}`);
+      setStatus(`Uploaded ${uploaded} ${noun}. Open View uploaded media, then drag one onto the day.${poster}${skippedText}`);
     } else if (skipNote) {
       setStatus(skipNote);
     }
@@ -970,8 +960,6 @@ export function mountAuthor(root: HTMLElement): void {
 
   coverToggle.addEventListener("click", () => setCoverOpen(coverPanel.hidden));
   coverClose.addEventListener("click", () => setCoverOpen(false));
-  addPhotosToggle.addEventListener("click", () => setAddOpen(addPhotosPanel.hidden));
-  addPhotosClose.addEventListener("click", () => setAddOpen(false));
   addedPhotosToggle.addEventListener("click", () => setAddedOpen(addedPhotos.hidden));
   addedPhotosClose.addEventListener("click", () => setAddedOpen(false));
   photoPreviewClose.addEventListener("click", () => closePhotoPreview());
@@ -1103,7 +1091,6 @@ export function mountAuthor(root: HTMLElement): void {
     void uploadMedia(files);
   });
   bindFileDrop(addDrop, (files) => {
-    setAddOpen(true);
     void uploadMedia(files);
   });
   createMedia.addEventListener("change", () => {
@@ -1138,7 +1125,7 @@ export function mountAuthor(root: HTMLElement): void {
       return;
     }
     if (event.dataTransfer?.files?.length) {
-      setStatus("Use Add photos to upload. Drag a thumbnail from Added photos onto the note.", true);
+      setStatus("Use the drop area above to upload. Drag a thumbnail from View uploaded media onto the note.", true);
     }
   });
 

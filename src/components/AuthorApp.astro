@@ -168,10 +168,7 @@ const { slug = "" } = Astro.props;
         <button type="button" id="cover-close" class="linkish">Close</button>
       </div>
     </div>
-    <p>
-      <button type="button" id="add-photos-toggle" aria-expanded="false">Add photos</button>
-    </p>
-    <div id="add-photos-panel" hidden>
+    <div id="add-photos-panel">
       <div id="add-drop" class="file-drop">
         <p>Drop photos and videos here</p>
         <label class="file-btn">
@@ -190,7 +187,6 @@ const { slug = "" } = Astro.props;
           </span>
         </li>
       </template>
-      <button type="button" id="add-photos-close" class="linkish">Close</button>
     </div>
 
     <div class="day-nav">
@@ -205,22 +201,23 @@ const { slug = "" } = Astro.props;
 
     <p id="status" class="meta" aria-live="polite"></p>
 
-    <p>
-      <button type="button" id="added-photos-toggle" aria-expanded="false">Added photos</button>
-    </p>
-    <div id="added-photos" hidden>
-      <p id="pool-hint" class="meta">Drag a thumbnail onto the day note. Double-click to see it full size.</p>
-      <div id="media-pool" class="cover-grid"></div>
-      <button type="button" id="added-photos-close" class="linkish">Close</button>
-    </div>
-
-    <div id="dropzone" class="dropzone">
-      <textarea
-        id="day-body"
-        rows="18"
-        placeholder="Write this day's notes. Drag a thumbnail from Added photos onto this text."
-      ></textarea>
-      <div class="drop-hint">Drag a photo or video from Added photos onto this note. A click does not add it. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
+    <div class="note-layout">
+      <p class="note-tools">
+        <button type="button" id="added-photos-toggle" aria-expanded="false">View uploaded media</button>
+      </p>
+      <div id="dropzone" class="dropzone">
+        <textarea
+          id="day-body"
+          rows="18"
+          placeholder="Write this day's notes. Drag a thumbnail from View uploaded media onto this text."
+        ></textarea>
+        <div class="drop-hint">Drag a photo or video from View uploaded media onto this note. A click does not add it. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
+      </div>
+      <aside id="added-photos" hidden>
+        <p id="pool-hint" class="meta">Drag a thumbnail onto the day note. Double-click to see it full size.</p>
+        <div id="media-pool" class="cover-grid"></div>
+        <button type="button" id="added-photos-close" class="linkish">Close</button>
+      </aside>
     </div>
 
     <div class="upload-row">
@@ -372,12 +369,33 @@ const { slug = "" } = Astro.props;
     margin: 0;
   }
   #cover-toggle,
-  #add-photos-toggle {
+  #added-photos-toggle {
     font-size: 0.9rem;
     padding: 0.45rem 0.75rem;
     border: 1px solid var(--line);
     background: var(--surface);
     color: var(--ink);
+  }
+  .note-tools {
+    margin: 0;
+  }
+  .note-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+  }
+  .editor:has(#added-photos:not([hidden])) {
+    max-width: 72rem;
+  }
+  .note-layout:has(#added-photos:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr) 17.5rem;
+  }
+  .note-layout:has(#added-photos:not([hidden])) .note-tools {
+    grid-column: 1 / -1;
+  }
+  #added-photos[hidden] {
+    display: none;
   }
   .file-drop {
     display: grid;

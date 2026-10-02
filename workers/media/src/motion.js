@@ -292,6 +292,85 @@ export function motionMarkup(model) {
     if (now >= spawnAt) spawn(now);
     requestAnimationFrame(tick);
   }
+  function addListedTrip(trip) {
+    const list = document.getElementById(trip.kind === "outing" ? "outing-list" : "trip-list");
+    if (!list) return;
+    const li = document.createElement("li");
+    li.dataset.date = trip.date || "";
+    const link = document.createElement("a");
+    link.href = "/travel-log/trips/" + encodeURIComponent(trip.slug) + "/";
+    if (trip.thumb) {
+      const img = document.createElement("img");
+      img.className = "thumb";
+      img.alt = "";
+      img.decoding = "async";
+      img.src = trip.thumb;
+      link.append(img);
+    }
+    const span = document.createElement("span");
+    const title = document.createElement("h2");
+    title.textContent = trip.title || trip.slug || "Trip";
+    span.append(title);
+    const where = [trip.location, trip.when].filter(Boolean).join(" · ");
+    if (where) {
+      const meta = document.createElement("p");
+      meta.className = "meta";
+      meta.textContent = where;
+      span.append(meta);
+    }
+    if (trip.summary) {
+      const summary = document.createElement("p");
+      summary.textContent = trip.summary;
+      span.append(summary);
+    }
+    link.append(span);
+    li.append(link);
+    let placed = false;
+    for (const child of Array.from(list.children)) {
+      if ((child.dataset.date || "") < (li.dataset.date || "")) {
+        list.insertBefore(li, child);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) list.append(li);
+    trips.push({ title: trip.title || "", when: trip.when || "", thumb: trip.thumb || "" });
+    syncCards();
+  }
+  function addListedPhoto(item) {
+    const url = item && item.url ? item.url : "";
+    if (!url || photos.indexOf(url) !== -1 || photos.length >= 240) return;
+    photos.push(url);
+  }
+  async function readNdjson(response, onItem) {
+    if (!response || !response.ok || !response.body) return;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const nl = String.fromCharCode(10);
+    let buf = "";
+    while (true) {
+      const step = await reader.read();
+      if (step.done) break;
+      buf += decoder.decode(step.value, { stream: true });
+      let cut = buf.indexOf(nl);
+      while (cut !== -1) {
+        const line = buf.slice(0, cut).trim();
+        buf = buf.slice(cut + 1);
+        if (line) onItem(JSON.parse(line));
+        cut = buf.indexOf(nl);
+      }
+    }
+    const last = buf.trim();
+    if (last) onItem(JSON.parse(last));
+  }
+  async function loadHome() {
+    if (!document.getElementById("log-panel")) return;
+    const tripResponse = await fetch("/travel-log/home-trips", { credentials: "same-origin" });
+    const photoResponse = fetch("/travel-log/home-photos", { credentials: "same-origin" });
+    await readNdjson(tripResponse, addListedTrip);
+    await readNdjson(await photoResponse, addListedPhoto);
+  }
+  void loadHome();
   if (!document.querySelector(".trip-list")) return;
   syncCards();
   requestAnimationFrame(tick);

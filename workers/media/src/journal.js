@@ -799,55 +799,102 @@ function formatRange(start, end) {
   return `${startText} – ${to.toLocaleDateString("en-US", { ...opts, timeZone: "UTC" })}`;
 }
 
+function ndjsonResponse(start) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (value) => {
+        controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+      };
+      try {
+        await start(send);
+        controller.close();
+      } catch (error) {
+        try {
+          controller.error(error);
+        } catch {
+          /* The stream is already closed. */
+        }
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+/** Trip names from index files only. Each line is sent as soon as that index is read. */
+export function streamHomeTrips(bucket) {
+  return ndjsonResponse(async (send) => {
+    const keys = (await listKeys(bucket, "trips/")).filter((key) => key.endsWith("/index.md"));
+    await Promise.all(
+      keys.map(async (key) => {
+        const raw = await readText(bucket, key);
+        if (!raw) return;
+        const { data } = parseFrontmatter(raw);
+        if (String(data.draft) === "true") return;
+        const slug = key.split("/")[1];
+        send({
+          slug,
+          title: data.title || slug,
+          location: data.location || "",
+          date: data.date || "",
+          endDate: data.endDate || "",
+          summary: data.summary || "",
+          kind: data.kind || "",
+          when: formatRange(data.date || "", data.endDate || ""),
+          thumb: gatedPhotoUrl(data.cover || ""),
+        });
+      }),
+    );
+  });
+}
+
+/** Photo addresses for the floating layer. Videos and draft trips are skipped. Lines are sent as each page of keys is listed. */
+export function streamHomePhotos(bucket) {
+  return ndjsonResponse(async (send) => {
+    const publicSlugs = new Set();
+    const indexes = (await listKeys(bucket, "trips/")).filter((key) => key.endsWith("/index.md"));
+    await Promise.all(
+      indexes.map(async (key) => {
+        const raw = await readText(bucket, key);
+        if (!raw) return;
+        const { data } = parseFrontmatter(raw);
+        if (String(data.draft) === "true") return;
+        publicSlugs.add(key.split("/")[1]);
+      }),
+    );
+    let sent = 0;
+    let cursor;
+    do {
+      const listed = await bucket.list({ prefix: "media/", cursor });
+      for (const object of listed.objects) {
+        const key = object.key;
+        const slug = key.split("/")[1];
+        if (!publicSlugs.has(slug) || !key.includes("/photos/") || !isImageFile(key)) continue;
+        if (sent >= MOTION_PHOTO_CAP) return;
+        sent += 1;
+        send({ url: `${PREFIX}/${key}` });
+      }
+      cursor = listed.truncated && sent < MOTION_PHOTO_CAP ? listed.cursor : undefined;
+    } while (cursor);
+  });
+}
+
 export async function renderJournal(bucket, url) {
   if (!bucket) return null;
   const path = url.pathname.replace(/\/+$/, "") || "/";
+  if (path === `${PREFIX}/home-trips`) return streamHomeTrips(bucket);
+  if (path === `${PREFIX}/home-photos`) return streamHomePhotos(bucket);
   if (path !== PREFIX && !path.startsWith(`${PREFIX}/trips/`)) return null;
 
   if (path === PREFIX) {
-    const keys = await listKeys(bucket, "trips/");
-    const indexes = keys.filter((key) => key.endsWith("/index.md"));
-    const trips = [];
-    const outings = [];
-    for (const key of indexes) {
-      const raw = await readText(bucket, key);
-      if (!raw) continue;
-      const { data } = parseFrontmatter(raw);
-      if (String(data.draft) === "true") continue;
-      const slug = key.split("/")[1];
-      const trip = {
-        slug,
-        title: data.title || slug,
-        location: data.location || "",
-        date: data.date || "",
-        endDate: data.endDate || "",
-        summary: data.summary || "",
-        kind: data.kind || "",
-        thumb: await tripThumbnail(bucket, slug, data),
-      };
-      if (trip.kind === "outing") outings.push(trip);
-      else trips.push(trip);
-    }
-    const byDate = (a, b) => String(b.date).localeCompare(String(a.date));
-    trips.sort(byDate);
-    outings.sort(byDate);
-    if (!trips.length && !outings.length) return null;
-    const listMarkup = (list) => {
-      if (!list.length) return `<p class="meta">None yet.</p>`;
-      const items = list
-        .map((trip) => {
-          const when = formatRange(trip.date, trip.endDate);
-          const where = [trip.location, when].filter(Boolean).join(" · ");
-          const thumb = trip.thumb ? `<img class="thumb" src="${escapeHtml(trip.thumb)}" alt="" decoding="async" />` : "";
-          return `<li><a href="${PREFIX}/trips/${encodeURIComponent(trip.slug)}/">${thumb}<span><h2>${escapeHtml(trip.title)}</h2><p class="meta">${escapeHtml(where)}</p>${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}</span></a></li>`;
-        })
-        .join("");
-      return `<ul class="trip-list">${items}</ul>`;
-    };
-    const motion = motionModel(await tripCatalog(bucket));
     return page(
       "Travel Log",
-      `<h1>Travel Log</h1><div class="log-menu"><button type="button" id="log-toggle" aria-expanded="false" aria-controls="log-panel">Travel log</button><div id="log-panel" hidden><h2>Trips</h2>${listMarkup(trips)}<h2>Day trips</h2>${listMarkup(outings)}</div></div><script>
+      `<h1>Travel Log</h1><div class="log-menu"><button type="button" id="log-toggle" aria-expanded="false" aria-controls="log-panel">Travel log</button><div id="log-panel" hidden><h2>Trips</h2><ul id="trip-list" class="trip-list"></ul><h2>Day trips</h2><ul id="outing-list" class="trip-list"></ul></div></div><script>
 (() => {
   const button = document.getElementById("log-toggle");
   const panel = document.getElementById("log-panel");
@@ -869,7 +916,7 @@ export async function renderJournal(bucket, url) {
   });
 })();
 </script>`,
-      motion,
+      { trips: [], photos: [] },
     );
   }
 

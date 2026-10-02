@@ -13,10 +13,11 @@ import {
 } from "../src/lib/github/commit-plan.ts";
 import { convertHeicFile } from "../src/lib/github/media.ts";
 import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
-import { mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
+import { POSTER_MAX_BYTES, isPosterKey, mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
 import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
-import { checkLogin, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
-import { isTripCoverPath, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
+import { checkLogin, loginPage, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
+import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
+import { posterStage } from "../workers/media/src/motion.js";
 import { putTripNotes, tripNoteKey } from "../workers/media/src/notes.js";
 import sharp from "sharp";
 
@@ -230,6 +231,12 @@ const bucket = {
 };
 const home = await renderJournal(bucket, new URL("https://gabriel-kane.com/travel-log/"));
 const homeHtml = await home.text();
+assert.match(homeHtml, /id="motion-layer"/);
+assert.match(homeHtml, /id="motion-debug"/);
+assert.match(homeHtml, /Peak opacity/);
+assert.match(homeHtml, /Travel distance \(% of screen\)/);
+assert.match(homeHtml, /pointer-events: none/);
+assert.match(homeHtml, /\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg/);
 assert.match(homeHtml, /<img class="thumb" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg" alt="" \/>/);
 assert.equal(homeHtml.includes("r2.dev"), false);
 assert.equal(homeHtml.includes("example-trip") && homeHtml.includes("<img"), true);
@@ -275,5 +282,25 @@ const coastHome = await renderJournal(writable, new URL("https://gabriel-kane.co
 assert.match(await coastHome.text(), /Coast Walk/);
 const coastPage = await renderJournal(writable, new URL("https://gabriel-kane.com/travel-log/trips/coast"));
 assert.match(await coastPage.text(), /Saw a heron/);
+
+assert.equal(isPosterKey("posters/olympic-peninsula/img-5123-2.jpg"), true);
+assert.equal(isPosterKey("media/olympic-peninsula/photos/img-5123-2.jpg"), false);
+assert.equal(isPosterKey("posters/../media/secret.jpg"), false);
+assert.equal(POSTER_MAX_BYTES, 120 * 1024);
+
+files.set("posters/olympic-peninsula/img-5123-2.jpg", "");
+files.set("posters/olympic-peninsula/notes.txt", "private day text");
+const cards = await publicTripCards(bucket);
+assert.equal(cards.length, 1);
+assert.deepEqual(cards[0].posters, ["/travel-log/posters/olympic-peninsula/img-5123-2.jpg"]);
+assert.equal(JSON.stringify(cards).includes("/travel-log/media/"), false);
+assert.equal(JSON.stringify(cards).includes("private day text"), false);
+const loginHtml = await (await loginPage("", "Wrong username or password.", posterStage(cards))).text();
+assert.match(loginHtml, /Gabe and Julia's Travel Log/);
+assert.match(loginHtml, /\/travel-log\/posters\/olympic-peninsula\/img-5123-2\.jpg/);
+assert.match(loginHtml, /Sep 5, 2026/);
+assert.match(loginHtml, /Wrong username or password/);
+assert.equal(loginHtml.includes("/travel-log/media/"), false);
+assert.equal(loginHtml.includes("private day text"), false);
 
 console.log("github author checks ok");

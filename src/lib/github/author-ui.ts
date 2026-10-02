@@ -11,6 +11,7 @@ import {
 import { addDays, slugify } from "./dates.ts";
 import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip } from "./frontmatter.ts";
 import { prepareDroppedFile } from "./media.ts";
+import { makePoster, posterObjectKey } from "./poster.ts";
 import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
 import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 
@@ -383,6 +384,7 @@ export function mountAuthor(root: HTMLElement): void {
     }
 
     const ready: { markdown: string; route?: PreparedRoute; cover?: string }[] = [];
+    let posterWarning = "";
     for (const item of prepared) {
       if (item.kind === "route" && item.repoPath) {
         ready.push({
@@ -405,6 +407,20 @@ export function mountAuthor(root: HTMLElement): void {
           contentType: item.contentType,
         });
         const alt = item.filename.replace(/\.[^.]+$/, "");
+        if (item.kind === "photo") {
+          try {
+            const posterBlob = await makePoster(new Blob([item.bytes], { type: "image/jpeg" }));
+            await uploadToBucket({
+              workerUrl: notesTarget().workerUrl,
+              token: notesTarget().token,
+              objectKey: posterObjectKey(trip.slug, item.filename),
+              bytes: new Uint8Array(await posterBlob.arrayBuffer()),
+              contentType: "image/jpeg",
+            });
+          } catch (error) {
+            posterWarning = error instanceof Error ? error.message : "Could not make the login poster.";
+          }
+        }
         ready.push({
           markdown: item.kind === "video" ? videoMarkdownUrl(url) : imageMarkdownUrl(url, alt),
           cover: item.kind === "photo" ? `/trip-media/${trip.slug}/photos/${item.filename}` : undefined,
@@ -418,6 +434,7 @@ export function mountAuthor(root: HTMLElement): void {
     for (const item of ready) insertAtCursor(bodyEl, item.markdown);
     const cover = trip.cover ? "" : ready.find((item) => item.cover)?.cover || "";
     await saveWithFiles(ready.flatMap((item) => (item.route ? [item.route] : [])), cover || undefined);
+    if (posterWarning) setStatus(`Saved the photo. Login poster failed: ${posterWarning}`);
   }
 
   function renderList(trips: RemoteTrip[]): void {

@@ -1,6 +1,7 @@
 import { AwsClient } from "aws4fetch";
-import { PUBLIC_PREFIX, isAllowedKey, isAllowedType, mediaPublicUrl, storageConfigError } from "./config.js";
-import { isTripCoverPath, renderJournal, setCoverFrontmatter } from "./journal.js";
+import { POSTER_MAX_BYTES, PUBLIC_PREFIX, isAllowedKey, isAllowedType, isPosterKey, mediaPublicUrl, storageConfigError } from "./config.js";
+import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "./journal.js";
+import { posterStage } from "./motion.js";
 import { listTripNoteKeys, putTripNotes, readTripNotes } from "./notes.js";
 import { checkLogin, loginPage, mediaGate, safeNext } from "./gate.js";
 
@@ -63,7 +64,7 @@ async function canEditNotes(request, env) {
   return { ok: false, status: 401, error: "Sign in to edit the travel log." };
 }
 
-async function presign(env, key, contentType) {
+async function presign(env, key, contentType, contentLength) {
   const aws = new AwsClient({
     accessKeyId: env.S3_ACCESS_KEY_ID,
     secretAccessKey: env.S3_SECRET_ACCESS_KEY,
@@ -73,14 +74,18 @@ async function presign(env, key, contentType) {
   const endpoint = env.S3_ENDPOINT.replace(/\/$/, "");
   const encodedKey = key.split("/").map(encodeURIComponent).join("/");
   const url = `${endpoint}/${env.S3_BUCKET}/${encodedKey}`;
+  const headers = { "content-type": contentType };
+  if (contentLength) headers["content-length"] = String(contentLength);
   const signed = await aws.sign(
-    new Request(url, { method: "PUT", headers: { "content-type": contentType } }),
+    new Request(url, { method: "PUT", headers }),
     { aws: { signQuery: true } },
   );
+  const responseHeaders = { "content-type": contentType };
+  if (contentLength) responseHeaders["content-length"] = String(contentLength);
   return {
     uploadUrl: signed.url,
     publicUrl: mediaPublicUrl(env.MEDIA_BASE_URL, key),
-    headers: { "content-type": contentType },
+    headers: responseHeaders,
   };
 }
 
@@ -119,6 +124,29 @@ function redirect(location) {
 
 function requestPath(url) {
   return url.pathname.replace(/\/+$/, "") || "/";
+}
+
+async function showLogin(env, next, error) {
+  let stage = "";
+  try {
+    if (env.TRIPS) stage = posterStage(await publicTripCards(env.TRIPS));
+  } catch {
+    stage = "";
+  }
+  return loginPage(next, error, stage);
+}
+
+async function servePoster(env, key) {
+  if (!isPosterKey(key) || !env.TRIPS) return json({ error: "Not found" }, 404);
+  const object = await env.TRIPS.get(key);
+  if (!object || (typeof object.size === "number" && object.size > POSTER_MAX_BYTES)) {
+    return json({ error: "Not found" }, 404);
+  }
+  const headers = new Headers();
+  headers.set("Content-Type", "image/jpeg");
+  headers.set("Cache-Control", "public, max-age=3600");
+  headers.set("X-Content-Type-Options", "nosniff");
+  return new Response(object.body, { status: 200, headers });
 }
 
 function loginRedirect(url) {
@@ -194,12 +222,16 @@ export default {
     }
 
     const underLog = path === PUBLIC_PREFIX || path.startsWith(`${PUBLIC_PREFIX}/`);
+    if (underLog && request.method === "GET" && path.startsWith(`${PUBLIC_PREFIX}/posters/`)) {
+      const key = decodeURIComponent(path.slice(`${PUBLIC_PREFIX}/`.length));
+      return servePoster(env, key);
+    }
     if (underLog && request.method === "GET" && path !== `${PUBLIC_PREFIX}/sign`) {
       const session = await mediaGate(request, env);
       const destination = safeNext(url.searchParams.get("next")) || `${PUBLIC_PREFIX}/`;
       if (path === `${PUBLIC_PREFIX}/login`) {
         if (session.ok) return redirect(destination);
-        return loginPage(url.searchParams.get("next"));
+        return showLogin(env, url.searchParams.get("next"));
       }
       if (!session.ok) return loginRedirect(url);
       if (url.pathname.startsWith(`${PUBLIC_PREFIX}/media/`)) {
@@ -241,7 +273,7 @@ export default {
         return json({ error: "Expected a login form." }, 400);
       }
       const result = await checkLogin(body, env);
-      if (!result.ok) return loginPage(url.searchParams.get("next"), result.error);
+      if (!result.ok) return showLogin(env, url.searchParams.get("next"), result.error);
       const type = request.headers.get("Content-Type") || "";
       const destination = safeNext(url.searchParams.get("next")) || `${PUBLIC_PREFIX}/`;
       if (type.includes("application/x-www-form-urlencoded") || type.includes("multipart/form-data")) {
@@ -333,15 +365,27 @@ export default {
     } catch {
       return cors(json({ error: "Expected a JSON body." }, 400));
     }
-    if (!isAllowedType(body.contentType)) {
-      return cors(json({ error: "Unsupported media type." }, 400));
-    }
-    if (!isAllowedKey(body.key)) {
-      return cors(json({ error: "Invalid object key." }, 400));
+    const poster = isPosterKey(body.key);
+    let posterBytes = 0;
+    if (poster) {
+      if (body.contentType !== "image/jpeg") {
+        return cors(json({ error: "Posters must be JPEG." }, 400));
+      }
+      posterBytes = Number(body.contentLength);
+      if (!Number.isInteger(posterBytes) || posterBytes < 1 || posterBytes > POSTER_MAX_BYTES) {
+        return cors(json({ error: "Poster is too large." }, 400));
+      }
+    } else {
+      if (!isAllowedType(body.contentType)) {
+        return cors(json({ error: "Unsupported media type." }, 400));
+      }
+      if (!isAllowedKey(body.key)) {
+        return cors(json({ error: "Invalid object key." }, 400));
+      }
     }
 
     try {
-      const signed = await presign(env, body.key, body.contentType);
+      const signed = await presign(env, body.key, body.contentType, poster ? posterBytes : 0);
       return cors(json(signed, 200));
     } catch {
       return cors(json({ error: "Could not sign the upload. Check the S3 endpoint and keys." }, 502));

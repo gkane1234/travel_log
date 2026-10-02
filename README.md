@@ -30,7 +30,7 @@ The default store is a private Cloudflare R2 bucket. The same Worker speaks S3, 
 
 Trip notes live in the private R2 bucket. The journal is shown only after the photo login. GitHub Pages still publishes the website code, including the author page.
 
-Photos and videos are not public. The bucket has no r2.dev URL in the notes. A day note stores a URL on your Cloudflare site, such as `https://gabriel-kane.com/travel-log/media/olympic-peninsula/shore.jpg`. The Worker returns that file only when the browser sends the photo-login cookie. A direct link without the cookie gets 401.
+Photos and videos are not public. The bucket has no r2.dev URL in the notes. A day note stores a URL on your Cloudflare site, such as `https://gabriel-kane.com/travel-log/media/olympic-peninsula/shore.jpg`. The Worker returns that file only when the browser sends the photo-login cookie. A direct link without the cookie gets 401. The login page may show separate tiny blurred posters at `/travel-log/posters/...`. Those are the only images served without the cookie.
 
 That cookie is first-party only. It is set when you sign in at `/travel-log/login` on gabriel-kane.com, with `Path=/travel-log` and `SameSite=Lax`. It is not sent when a github.io page loads images from a different host, so pictures on GitHub Pages stay locked. View photos on https://gabriel-kane.com, where the pages and `/travel-log/media` are the same site.
 
@@ -107,6 +107,7 @@ Keep the bucket private. `MEDIA_BASE_URL` is still your Cloudflare site, not a p
 trips/<slug>/index.md
 trips/<slug>/days/YYYY-MM-DD.mdx
 media/<slug>/photos/<file>
+posters/<slug>/<file>.jpg
 trips/<slug>/routes/<file>.gpx
 ```
 

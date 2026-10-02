@@ -41,6 +41,7 @@ export async function uploadToBucket(options: {
       body: JSON.stringify({
         key: options.objectKey,
         contentType: options.contentType,
+        contentLength: options.bytes.byteLength,
       }),
     });
     const data = (await response.json().catch(() => ({}))) as { error?: string; uploadUrl?: string; publicUrl?: string; headers?: Record<string, string> };

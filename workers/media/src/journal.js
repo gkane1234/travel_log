@@ -1,3 +1,6 @@
+import { isPosterKey } from "./config.js";
+import { motionMarkup } from "./motion.js";
+
 const PREFIX = "/travel-log";
 
 function escapeHtml(value) {
@@ -95,7 +98,7 @@ function renderBody(raw) {
     .join("\n");
 }
 
-function page(title, main) {
+function page(title, main, motion) {
   return new Response(
     `<!doctype html>
 <html lang="en">
@@ -107,7 +110,19 @@ function page(title, main) {
     :root { color: #1c241e; background: #f3efe6; font-family: Georgia, "Times New Roman", serif; }
     body { margin: 0; }
     a { color: #2e4a3e; }
-    header, main { max-width: 42rem; margin: 0 auto; padding: 1.25rem; }
+    #motion-names, #motion-layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+    .name-card { position: absolute; top: 0; left: 0; display: flex; gap: 0.55rem; align-items: center; width: max-content; max-width: 16rem; padding: 0.35rem 0.6rem 0.35rem 0.35rem; background: rgba(243, 239, 230, 0.72); border-radius: 999px; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
+    .name-card img { width: 3.2rem; height: 2.4rem; object-fit: cover; border-radius: 999px; margin: 0; }
+    .float-photo { position: absolute; height: auto; margin: 0; border-radius: 8px; box-shadow: 0 8px 24px rgba(28, 36, 30, 0.18); }
+    #motion-debug { position: fixed; right: 0.8rem; bottom: 0.8rem; z-index: 5; width: min(18rem, calc(100% - 1.6rem)); padding: 0.7rem 0.8rem; background: rgba(28, 36, 30, 0.92); color: #f3efe6; font-family: "Segoe UI", sans-serif; font-size: 0.82rem; border-radius: 8px; }
+    #motion-debug .debug-bar { display: flex; justify-content: space-between; align-items: center; }
+    #motion-debug button { font: inherit; background: transparent; color: inherit; border: 0; cursor: pointer; }
+    #motion-form { display: grid; gap: 0.35rem; margin-top: 0.45rem; }
+    #motion-form label { display: grid; gap: 0.1rem; }
+    #motion-form input { font: inherit; width: 100%; }
+    #motion-debug .debug-note { margin: 0.45rem 0 0; opacity: 0.8; }
+    header, main { position: relative; z-index: 1; max-width: 42rem; margin: 0 auto; padding: 1.25rem; }
+    main { background: rgba(243, 239, 230, 0.88); }
     header { display: flex; justify-content: space-between; align-items: baseline; }
     h1, h2 { font-weight: 600; letter-spacing: -0.02em; }
     .meta { color: #5c675f; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
@@ -121,6 +136,7 @@ function page(title, main) {
   </style>
 </head>
 <body>
+  ${motion ? motionMarkup(motion) : ""}
   <header>
     <a href="${PREFIX}/">Travel Log</a>
     <a href="${PREFIX}/author/">Author</a>
@@ -163,6 +179,69 @@ async function tripThumbnail(bucket, slug, data) {
     .filter((key) => isImageFile(key))
     .sort();
   return mediaKeys[0] ? `${PREFIX}/${mediaKeys[0]}` : "";
+}
+
+function photosInMarkdown(raw) {
+  const urls = [];
+  const body = parseFrontmatter(raw).body;
+  for (const match of body.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {
+    const href = gatedPhotoUrl(match[1]);
+    if (href && !urls.includes(href)) urls.push(href);
+  }
+  return urls;
+}
+
+async function tripCatalog(bucket) {
+  const keys = await listKeys(bucket, "trips/");
+  const trips = [];
+  const photos = [];
+  for (const key of keys.filter((item) => item.endsWith("/index.md"))) {
+    const raw = await readText(bucket, key);
+    if (!raw) continue;
+    const { data } = parseFrontmatter(raw);
+    if (String(data.draft) === "true") continue;
+    const slug = key.split("/")[1];
+    const dayKeys = (await listKeys(bucket, `trips/${slug}/days/`)).filter((item) => /\.(md|mdx)$/.test(item)).sort();
+    for (const dayKey of dayKeys) {
+      const day = await readText(bucket, dayKey);
+      if (!day) continue;
+      for (const href of photosInMarkdown(day)) {
+        if (photos.length >= 120) break;
+        if (!photos.includes(href)) photos.push(href);
+      }
+    }
+    trips.push({
+      title: data.title || slug,
+      location: data.location || "",
+      when: formatRange(data.date || "", data.endDate || ""),
+      thumb: await tripThumbnail(bucket, slug, data),
+      slug,
+    });
+  }
+  return { trips, photos };
+}
+
+export async function publicTripCards(bucket) {
+  const { trips } = await tripCatalog(bucket);
+  const cards = [];
+  for (const trip of trips) {
+    const posterKeys = (await listKeys(bucket, `posters/${trip.slug}/`)).filter((key) => isPosterKey(key)).slice(0, 16);
+    if (!posterKeys.length) continue;
+    cards.push({
+      title: trip.title,
+      location: trip.location,
+      when: trip.when,
+      posters: posterKeys.map((key) => `${PREFIX}/${key}`),
+    });
+  }
+  return cards;
+}
+
+function motionModel(catalog) {
+  return {
+    trips: catalog.trips.map((trip) => ({ title: trip.title, thumb: trip.thumb })),
+    photos: catalog.photos,
+  };
 }
 
 function formatRange(start, end) {
@@ -211,7 +290,8 @@ export async function renderJournal(bucket, url) {
         return `<li><a href="${PREFIX}/trips/${encodeURIComponent(trip.slug)}/">${thumb}<span><h2>${escapeHtml(trip.title)}</h2><p class="meta">${escapeHtml(where)}</p>${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}</span></a></li>`;
       })
       .join("");
-    return page("Travel Log", `<h1>Travel Log</h1><p class="meta">Trips we've taken together.</p><ul class="trip-list">${items}</ul>`);
+    const motion = motionModel(await tripCatalog(bucket));
+    return page("Travel Log", `<h1>Travel Log</h1><p class="meta">Trips we've taken together.</p><ul class="trip-list">${items}</ul>`, motion);
   }
 
   const slug = path.slice(`${PREFIX}/trips/`.length).split("/")[0];
@@ -237,5 +317,6 @@ export async function renderJournal(bucket, url) {
     thumb = mediaKeys[0] ? `${PREFIX}/${mediaKeys[0]}` : "";
   }
   const cover = thumb ? `<img class="cover" src="${escapeHtml(thumb)}" alt="" />` : "";
-  return page(data.title || slug, `<p class="meta"><a href="${PREFIX}/">Trips</a></p><h1>${escapeHtml(data.title || slug)}</h1>${cover}<p class="meta">${escapeHtml(where)}</p>${renderBody(body)}${days.join("")}`);
+  const motion = motionModel(await tripCatalog(bucket));
+  return page(data.title || slug, `<p class="meta"><a href="${PREFIX}/">Trips</a></p><h1>${escapeHtml(data.title || slug)}</h1>${cover}<p class="meta">${escapeHtml(where)}</p>${renderBody(body)}${days.join("")}`, motion);
 }

@@ -41,6 +41,14 @@ export function isAllowedKey(key) {
   return typeof key === "string" && KEY.test(key) && !key.includes("..");
 }
 
+const POSTER_KEY = /^posters\/[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9][a-z0-9._-]{0,160}\.jpe?g$/;
+
+export const POSTER_MAX_BYTES = 120 * 1024;
+
+export function isPosterKey(key) {
+  return typeof key === "string" && POSTER_KEY.test(key) && !key.includes("..");
+}
+
 const TYPES = new Set([
   "image/jpeg",
   "image/png",

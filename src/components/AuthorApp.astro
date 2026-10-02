@@ -128,6 +128,30 @@ const { slug = "" } = Astro.props;
     </p>
     <h1 id="trip-title">Loading…</h1>
     <p id="trip-meta" class="meta"></p>
+    <form id="details-form" class="author-form">
+      <h2>Trip details</h2>
+      <label>
+        Name
+        <input id="details-title" name="title" required />
+      </label>
+      <label>
+        Location
+        <input id="details-location" name="location" />
+      </label>
+      <div class="row">
+        <label>
+          Start date
+          <input id="details-date" name="date" type="date" required />
+        </label>
+        <label>
+          End date
+          <input id="details-end" name="endDate" type="date" />
+        </label>
+      </div>
+      <p class="meta">A day trip can be a single date. Changing the name keeps the same address.</p>
+      <button type="submit">Save details</button>
+      <p id="details-error" class="error" hidden></p>
+    </form>
     <p>
       <button type="button" id="publish-trip" class="linkish">Show on the public site</button>
     </p>

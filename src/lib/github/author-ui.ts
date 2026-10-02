@@ -15,6 +15,7 @@ import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip 
 import { prepareDroppedFile } from "./media.ts";
 import { makePoster, posterObjectKey } from "./poster.ts";
 import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
+import { dateRangeRefusal, dayNotesOutsideRange, type DayNote } from "./trip-details.ts";
 import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 
 type PreparedRoute = { repoPath: string; bytes: Uint8Array };
@@ -82,6 +83,12 @@ export function mountAuthor(root: HTMLElement): void {
   const gpxInput = must<HTMLInputElement>(root, "gpx-input");
   const viewLink = must<HTMLAnchorElement>(root, "view-link");
   const publishBtn = must<HTMLButtonElement>(root, "publish-trip");
+  const detailsForm = must<HTMLFormElement>(root, "details-form");
+  const detailsTitle = must<HTMLInputElement>(root, "details-title");
+  const detailsLocation = must<HTMLInputElement>(root, "details-location");
+  const detailsDate = must<HTMLInputElement>(root, "details-date");
+  const detailsEnd = must<HTMLInputElement>(root, "details-end");
+  const detailsError = must<HTMLElement>(root, "details-error");
   const coverChoices = must<HTMLElement>(root, "cover-choices");
   const saveCoverBtn = must<HTMLButtonElement>(root, "save-cover");
   const mediaPool = must<HTMLElement>(root, "media-pool");
@@ -201,6 +208,53 @@ export function mountAuthor(root: HTMLElement): void {
     viewLink.href = `${base}trips/${trip.slug}/`;
     publishBtn.textContent = trip.draft ? "Show on the public site" : "Hide from the public site";
     selectedCover = trip.cover || "";
+  }
+
+  function fillDetailsForm(): void {
+    if (!trip) return;
+    detailsTitle.value = trip.title;
+    detailsLocation.value = trip.location || "";
+    detailsDate.value = trip.date;
+    detailsEnd.value = trip.endDate || "";
+    detailsError.hidden = true;
+    detailsError.textContent = "";
+  }
+
+  function showDetailsError(message: string): void {
+    detailsError.textContent = message;
+    detailsError.hidden = !message;
+  }
+
+  async function noteTextForDate(slug: string, date: string): Promise<string> {
+    const files = [`trips/${slug}/days/${date}.mdx`, `trips/${slug}/days/${date}.md`];
+    const parts: string[] = [];
+    let sawEditor = false;
+    for (const path of files) {
+      const editing = date === currentDate && path === dayPath(slug, date);
+      if (editing) {
+        parts.push(bodyEl.value);
+        sawEditor = true;
+        continue;
+      }
+      if (!paths.includes(path)) continue;
+      parts.push((await readNote(path)) ?? "");
+    }
+    if (!sawEditor && date === currentDate) parts.push(bodyEl.value);
+    return parts.join("\n");
+  }
+
+  async function storedDayNotes(slug: string): Promise<DayNote[]> {
+    const dates = new Set<string>();
+    for (const path of paths) {
+      const match = path.match(new RegExp(`^trips/${slug}/days/(\\d{4}-\\d{2}-\\d{2})\\.(?:md|mdx)$`));
+      if (match) dates.add(match[1]);
+    }
+    if (currentDate) dates.add(currentDate);
+    const notes: DayNote[] = [];
+    for (const date of [...dates].sort()) {
+      notes.push({ date, text: await noteTextForDate(slug, date) });
+    }
+    return notes;
   }
 
   function markCoverSelection(): void {
@@ -397,6 +451,7 @@ export function mountAuthor(root: HTMLElement): void {
       }
       trip = tripFromIndex(slug, found.indexPath, raw, found.days);
       renderTripMeta();
+      fillDetailsForm();
       const start = date || currentDate || trip.date;
       const clamped = trip.endDate && start > trip.endDate ? trip.endDate : start < trip.date ? trip.date : start;
       await loadDay(clamped || trip.date, { saveFirst: false });
@@ -772,6 +827,73 @@ export function mountAuthor(root: HTMLElement): void {
       setStatus(selectedCover ? "Thumbnail saved." : "Thumbnail will be the first photo in the trip.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not save the thumbnail.");
+    }
+  });
+
+  detailsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!trip || saving) return;
+    showDetailsError("");
+    const title = detailsTitle.value.trim();
+    const locationName = detailsLocation.value.trim();
+    const date = detailsDate.value;
+    const endDate = detailsEnd.value;
+    const slug = trip.slug;
+    if (!title) {
+      showDetailsError("Name is required.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      showDetailsError("Start date is required.");
+      return;
+    }
+    if (endDate && endDate < date) {
+      showDetailsError("End date is before the start date.");
+      return;
+    }
+    saving = true;
+    setStatus("Saving…");
+    try {
+      const outside = dayNotesOutsideRange(await storedDayNotes(slug), date, endDate);
+      if (outside.length) {
+        const message = dateRangeRefusal(outside);
+        showDetailsError(message);
+        setStatus(message, true);
+        return;
+      }
+      const raw = await readNote(trip.indexPath);
+      if (raw == null) throw new Error("Could not read the trip index.");
+      const parsed = parseFrontmatter(raw);
+      parsed.data.title = title;
+      parsed.data.date = date;
+      if (endDate) parsed.data.endDate = endDate;
+      else delete parsed.data.endDate;
+      if (locationName) parsed.data.location = locationName;
+      else delete parsed.data.location;
+      await saveNotes([{ path: trip.indexPath, text: stringifyFrontmatter(parsed.data, parsed.body) }]);
+      trip = {
+        ...trip,
+        slug,
+        title,
+        date,
+        endDate: endDate || undefined,
+        location: locationName || undefined,
+      };
+      renderTripMeta();
+      fillDetailsForm();
+      const rangeEnd = endDate || date;
+      if (!currentDate || currentDate < date || currentDate > rangeEnd) {
+        await loadDay(date, { saveFirst: false });
+      } else {
+        renderNav();
+      }
+      setStatus("Trip details saved.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save the trip details.";
+      showDetailsError(message);
+      setStatus(message, true);
+    } finally {
+      saving = false;
     }
   });
 

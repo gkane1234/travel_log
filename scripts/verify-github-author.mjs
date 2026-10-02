@@ -23,6 +23,7 @@ import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
 import { checkLogin, loginPage, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
 import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
 import { posterStage } from "../workers/media/src/motion.js";
+import { dateRangeRefusal, dayNotesOutsideRange } from "../src/lib/github/trip-details.ts";
 import { putTripNotes, tripNoteKey } from "../workers/media/src/notes.js";
 import sharp from "sharp";
 
@@ -382,6 +383,12 @@ assert.match(authorMarkup, /name="kind" value="trip"/);
 assert.match(authorMarkup, /name="kind" value="outing"/);
 assert.match(authorMarkup, /Day trip/);
 assert.match(authorMarkup, /id="media-pool"/);
+assert.match(authorMarkup, /id="details-form"/);
+assert.match(authorMarkup, /id="details-title"/);
+assert.match(authorMarkup, /id="details-location"/);
+assert.match(authorMarkup, /id="details-date"/);
+assert.match(authorMarkup, /id="details-end"/);
+assert.match(authorMarkup, /Save details/);
 const authorUi = readFileSync(new URL("../src/lib/github/author-ui.ts", import.meta.url), "utf8");
 assert.match(authorUi, /gatedMediaUrl\(trip\.slug, item\.filename\)/);
 assert.match(authorUi, /img\.src = src/);
@@ -390,6 +397,38 @@ assert.match(authorUi, /placedImageMarkdown/);
 assert.match(authorUi, /placedVideoMarkdown/);
 assert.match(authorUi, /draft: false/);
 assert.match(authorUi, /kind: kind \|\| undefined/);
+assert.match(authorUi, /dayNotesOutsideRange/);
+assert.match(authorUi, /dateRangeRefusal/);
+assert.match(authorUi, /path: trip\.indexPath/);
+assert.equal(authorUi.includes("indexRepoPath(slugify("), false);
+
+const kept = [
+  { date: "2026-09-05", text: "Ferry at dawn.\n" },
+  { date: "2026-09-06", text: "\n" },
+  { date: "2026-09-08", text: "Rain in the Hoh.\n" },
+];
+assert.deepEqual(dayNotesOutsideRange(kept, "2026-09-04", "2026-09-09"), []);
+assert.deepEqual(dayNotesOutsideRange(kept, "2026-09-05", "2026-09-08"), []);
+assert.deepEqual(dayNotesOutsideRange(kept, "2026-09-06", "2026-09-08"), ["2026-09-05"]);
+assert.deepEqual(dayNotesOutsideRange(kept, "2026-09-05", "2026-09-07"), ["2026-09-08"]);
+assert.deepEqual(dayNotesOutsideRange(kept, "2026-09-05", ""), ["2026-09-08"]);
+assert.deepEqual(
+  dayNotesOutsideRange(
+    [
+      { date: "2026-07-04", text: "   \n" },
+      { date: "2026-07-05", text: "" },
+    ],
+    "2026-07-04",
+    "",
+  ),
+  [],
+);
+const dropped = dayNotesOutsideRange(kept, "2026-09-06", "2026-09-07");
+assert.deepEqual(dropped, ["2026-09-05", "2026-09-08"]);
+assert.equal(
+  dateRangeRefusal(dropped),
+  "Cannot save these dates. These day notes would no longer be in the trip: 2026-09-05, 2026-09-08. The notes were left in place.",
+);
 const preview = `<img src="${gatedMediaUrl("olympic-peninsula", "img-5123-2.jpg")}" alt="img-5123-2.jpg" />`;
 assert.match(preview, /src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
 assert.equal(preview.includes("r2.dev"), false);

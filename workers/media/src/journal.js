@@ -229,25 +229,54 @@ function photosInMarkdown(raw) {
   return urls;
 }
 
+const MOTION_PHOTO_CAP = 240;
+
+function rememberPhoto(list, href) {
+  if (href && !list.includes(href)) list.push(href);
+}
+
+async function motionPhotosForTrip(bucket, slug) {
+  const found = [];
+  const dayKeys = (await listKeys(bucket, `trips/${slug}/days/`)).filter((item) => /\.(md|mdx)$/.test(item)).sort();
+  for (const dayKey of dayKeys) {
+    const day = await readText(bucket, dayKey);
+    if (!day) continue;
+    for (const href of photosInMarkdown(day)) rememberPhoto(found, href);
+  }
+  const keys = (await listKeys(bucket, `media/${slug}/photos/`)).filter((key) => isImageFile(key)).sort();
+  for (const key of keys) rememberPhoto(found, `${PREFIX}/${key}`);
+  return found;
+}
+
+function interleavePhotos(groups) {
+  const photos = [];
+  let index = 0;
+  while (photos.length < MOTION_PHOTO_CAP) {
+    let added = false;
+    for (const group of groups) {
+      const href = group[index];
+      if (!href) continue;
+      rememberPhoto(photos, href);
+      added = true;
+      if (photos.length >= MOTION_PHOTO_CAP) break;
+    }
+    if (!added) break;
+    index += 1;
+  }
+  return photos;
+}
+
 async function tripCatalog(bucket) {
   const keys = await listKeys(bucket, "trips/");
   const trips = [];
-  const photos = [];
+  const groups = [];
   for (const key of keys.filter((item) => item.endsWith("/index.md"))) {
     const raw = await readText(bucket, key);
     if (!raw) continue;
     const { data } = parseFrontmatter(raw);
     if (String(data.draft) === "true") continue;
     const slug = key.split("/")[1];
-    const dayKeys = (await listKeys(bucket, `trips/${slug}/days/`)).filter((item) => /\.(md|mdx)$/.test(item)).sort();
-    for (const dayKey of dayKeys) {
-      const day = await readText(bucket, dayKey);
-      if (!day) continue;
-      for (const href of photosInMarkdown(day)) {
-        if (photos.length >= 120) break;
-        if (!photos.includes(href)) photos.push(href);
-      }
-    }
+    groups.push(await motionPhotosForTrip(bucket, slug));
     trips.push({
       title: data.title || slug,
       location: data.location || "",
@@ -256,7 +285,7 @@ async function tripCatalog(bucket) {
       slug,
     });
   }
-  return { trips, photos };
+  return { trips, photos: interleavePhotos(groups) };
 }
 
 export async function publicTripCards(bucket) {

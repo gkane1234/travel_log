@@ -299,8 +299,12 @@ const files = new Map([
     "---\ntitle: Secret Draft\ndate: 2026-11-01\ndraft: true\n---\n",
   ],
   ["media/olympic-peninsula/photos/clip.mp4", ""],
+  ["media/olympic-peninsula/photos/gallery-only.jpg", ""],
   ["media/olympic-peninsula/photos/shore.gpx", ""],
   ["media/olympic-peninsula/routes/shoreline.gpx", ""],
+  ["media/example-trip/photos/pier.jpg", ""],
+  ["media/example-trip/photos/clip.mp4", ""],
+  ["media/secret-draft/photos/hidden.jpg", ""],
 ]);
 const bucket = {
   async list({ prefix }) {
@@ -323,6 +327,10 @@ assert.match(homeHtml, /Peak opacity/);
 assert.match(homeHtml, /Travel distance \(% of screen\)/);
 assert.match(homeHtml, /pointer-events: none/);
 assert.match(homeHtml, /\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg/);
+assert.match(homeHtml, /\/travel-log\/media\/olympic-peninsula\/photos\/gallery-only\.jpg/);
+assert.match(homeHtml, /\/travel-log\/media\/example-trip\/photos\/pier\.jpg/);
+assert.equal(homeHtml.includes("/travel-log/media/example-trip/photos/clip.mp4"), false);
+assert.equal(homeHtml.includes("hidden.jpg"), false);
 assert.match(homeHtml, /<img class="thumb" src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg" alt="" \/>/);
 assert.match(homeHtml, /<h2>Trips<\/h2>/);
 assert.match(homeHtml, /<h2>Day trips<\/h2>/);
@@ -337,7 +345,8 @@ assert.match(homeHtml, /Oct 4, 2026/);
 assert.match(homeHtml, /Jul 4, 2026/);
 assert.equal(homeHtml.includes("Secret Draft"), false);
 assert.match(homeHtml, /"title":"Ferry Ride","when":"Jul 4, 2026","thumb":""/);
-assert.match(homeHtml, /"title":"Example Trip","when":"Aug 12, 2024","thumb":""/);
+assert.match(homeHtml, /"title":"Example Trip","when":"Aug 12, 2024","thumb":"\/travel-log\/media\/example-trip\/photos\/pier\.jpg"/);
+assert.match(homeHtml, /"title":"Cabin Weekend","when":"Oct 2, 2026 – Oct 4, 2026","thumb":""/);
 assert.match(homeHtml, /Sep 5, 2026/);
 assert.match(homeHtml, /Sep 12, 2026/);
 assert.match(homeHtml, /id="motion-layer"/);

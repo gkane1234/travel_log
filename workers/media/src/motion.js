@@ -7,6 +7,7 @@ const DEFAULTS = {
   fadeOut: 1.6,
   hold: 0.8,
   spawn: 2.2,
+  appearDelay: 2,
   maxPhotos: 5,
   nameSpeed: 24,
   nameCards: 4,
@@ -93,6 +94,7 @@ export function motionMarkup(model) {
     ${field("hold", "Hold (seconds)", 0, 12, 0.1)}
     ${field("fadeOut", "Fade out (seconds)", 0.1, 12, 0.1)}
     ${field("spawn", "New photo every (seconds)", 0.3, 20, 0.1)}
+    ${field("appearDelay", "Appear delay (seconds)", 0, 8, 0.1)}
     ${field("maxPhotos", "Photos on screen", 1, 20, 1)}
     ${field("photoWidth", "Photo width (px)", 80, 640, 10)}
     ${field("nameSpeed", "Name card speed", 4, 120, 1)}
@@ -237,10 +239,14 @@ export function motionMarkup(model) {
       img,
       url,
       show() {
-        floatPending -= 1;
-        if (floats.length >= Math.max(1, Math.round(settings.maxPhotos))) return;
-        layer.append(img);
-        floats.push({ el: img, born: performance.now(), angle });
+        const maxWait = Math.max(0, Number(settings.appearDelay) || 0);
+        const wait = Math.random() * maxWait * 1000;
+        window.setTimeout(() => {
+          floatPending -= 1;
+          if (floats.length >= Math.max(1, Math.round(settings.maxPhotos))) return;
+          layer.append(img);
+          floats.push({ el: img, born: performance.now(), angle });
+        }, wait);
       },
       failed() {
         floatPending -= 1;

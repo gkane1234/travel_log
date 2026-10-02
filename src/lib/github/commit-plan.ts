@@ -90,6 +90,15 @@ export function coverPathFromUrl(slug: string, url: string): string {
   return "";
 }
 
+/** Login-gated photo address. Empty when the cover path is not a trip photo. */
+export function coverMediaUrl(coverPath: string): string {
+  const match = coverPath.match(
+    /^\/trip-media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/,
+  );
+  if (!match || !isImageFilename(match[2])) return "";
+  return `/travel-log/media/${match[1]}/photos/${match[2]}`;
+}
+
 export function photoPathsInMarkdown(slug: string, markdown: string): string[] {
   const found: string[] = [];
   for (const match of markdown.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)) {

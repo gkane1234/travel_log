@@ -3,6 +3,7 @@ import {
   filenamesIn,
   imageMarkdownUrl,
   indexRepoPath,
+  coverMediaUrl,
   indexTrips,
   photoPathsInMarkdown,
   videoMarkdownUrl,
@@ -71,8 +72,9 @@ export function mountAuthor(root: HTMLElement): void {
   const gpxInput = must<HTMLInputElement>(root, "gpx-input");
   const viewLink = must<HTMLAnchorElement>(root, "view-link");
   const publishBtn = must<HTMLButtonElement>(root, "publish-trip");
-  const coverSelect = must<HTMLSelectElement>(root, "cover-select");
+  const coverChoices = must<HTMLElement>(root, "cover-choices");
   const saveCoverBtn = must<HTMLButtonElement>(root, "save-cover");
+  let selectedCover = "";
 
   function show(name: keyof typeof screens): void {
     for (const [key, el] of Object.entries(screens)) {
@@ -182,35 +184,53 @@ export function mountAuthor(root: HTMLElement): void {
       .join(" · ");
     viewLink.href = `${base}trips/${trip.slug}/`;
     publishBtn.textContent = trip.draft ? "Show on the public site" : "Hide from the public site";
-    if (trip.cover && ![...coverSelect.options].some((option) => option.value === trip.cover)) {
-      const option = document.createElement("option");
-      option.value = trip.cover;
-      option.textContent = trip.cover.split("/").pop() || trip.cover;
-      coverSelect.append(option);
-    }
-    coverSelect.value = trip.cover || "";
+    selectedCover = trip.cover || "";
   }
 
-  function fillCoverSelect(paths: string[]): void {
-    const current = trip?.cover || "";
-    coverSelect.replaceChildren();
-    const automatic = document.createElement("option");
-    automatic.value = "";
-    automatic.textContent = "First photo in the trip";
-    coverSelect.append(automatic);
-    for (const path of paths) {
-      const option = document.createElement("option");
-      option.value = path;
-      option.textContent = path.split("/").pop() || path;
-      coverSelect.append(option);
+  function markCoverSelection(): void {
+    coverChoices.querySelectorAll<HTMLButtonElement>("[data-cover]").forEach((button) => {
+      const on = (button.dataset.cover || "") === selectedCover;
+      button.classList.toggle("is-selected", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+
+  function coverTile(coverPath: string, label: string): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cover-choice";
+    button.dataset.cover = coverPath;
+    if (coverPath) {
+      const src = coverMediaUrl(coverPath);
+      if (src) {
+        const img = document.createElement("img");
+        img.src = src;
+        img.alt = label;
+        img.addEventListener("error", () => {
+          img.hidden = true;
+        });
+        button.append(img);
+      }
     }
-    if (current && !paths.includes(current)) {
-      const option = document.createElement("option");
-      option.value = current;
-      option.textContent = current.split("/").pop() || current;
-      coverSelect.append(option);
+    const name = document.createElement("span");
+    name.textContent = label;
+    button.append(name);
+    button.addEventListener("click", () => {
+      selectedCover = coverPath;
+      markCoverSelection();
+    });
+    return button;
+  }
+
+  function fillCoverGrid(photoPaths: string[]): void {
+    const choices = [...photoPaths];
+    if (selectedCover && !choices.includes(selectedCover)) choices.push(selectedCover);
+    coverChoices.replaceChildren();
+    coverChoices.append(coverTile("", "First photo in the trip"));
+    for (const path of choices) {
+      coverChoices.append(coverTile(path, path.split("/").pop() || path));
     }
-    coverSelect.value = current;
+    markCoverSelection();
   }
 
   async function refreshCoverChoices(): Promise<void> {
@@ -227,7 +247,7 @@ export function mountAuthor(root: HTMLElement): void {
       add(raw ?? "");
     }
     add(bodyEl.value);
-    fillCoverSelect(found);
+    fillCoverGrid(found);
   }
 
   async function persistCover(cover: string): Promise<void> {
@@ -564,8 +584,8 @@ export function mountAuthor(root: HTMLElement): void {
     if (!trip) return;
     setStatus("Saving thumbnail…");
     try {
-      const live = await persistCover(coverSelect.value);
-      setStatus(live || (coverSelect.value ? "Thumbnail saved." : "Thumbnail will be the first photo in the trip."));
+      await persistCover(selectedCover);
+      setStatus(selectedCover ? "Thumbnail saved." : "Thumbnail will be the first photo in the trip.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not save the thumbnail.");
     }

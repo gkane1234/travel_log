@@ -7,6 +7,7 @@ import {
   gitCommitPlan,
   imageMarkdownUrl,
   mediaObjectKey,
+  coverMediaUrl,
   photoPathsInMarkdown,
   routeRepoPath,
 } from "../src/lib/github/commit-plan.ts";
@@ -172,6 +173,13 @@ assert.equal(
   mediaObjectKey("olympic-peninsula", "img-5123-2.jpg"),
   "media/olympic-peninsula/photos/img-5123-2.jpg",
 );
+const thumb = "/trip-media/olympic-peninsula/photos/img-5123-2.jpg";
+assert.equal(coverMediaUrl(thumb), "/travel-log/media/olympic-peninsula/photos/img-5123-2.jpg");
+assert.equal(coverMediaUrl("https://pub.r2.dev/img-5123-2.jpg"), "");
+const picker = `<button class="cover-choice"><img src="${coverMediaUrl(thumb)}" alt="img-5123-2.jpg" /><span>img-5123-2.jpg</span></button>`;
+assert.match(picker, /<img src="\/travel-log\/media\/olympic-peninsula\/photos\/img-5123-2\.jpg"/);
+assert.equal(picker.includes("r2.dev"), false);
+
 assert.deepEqual(
   photoPathsInMarkdown(
     "olympic-peninsula",

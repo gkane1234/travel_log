@@ -8,6 +8,7 @@ const DEFAULTS = {
   hold: 0.8,
   spawn: 2.2,
   appearDelay: 2,
+  recentLimit: 20,
   maxPhotos: 5,
   nameSpeed: 24,
   nameCards: 4,
@@ -95,6 +96,7 @@ export function motionMarkup(model) {
     ${field("fadeOut", "Fade out (seconds)", 0.1, 12, 0.1)}
     ${field("spawn", "New photo every (seconds)", 0.3, 20, 0.1)}
     ${field("appearDelay", "Appear delay (seconds)", 0, 8, 0.1)}
+    ${field("recentLimit", "Recent photos", 1, 80, 1)}
     ${field("maxPhotos", "Photos on screen", 1, 20, 1)}
     ${field("photoWidth", "Photo width (px)", 80, 640, 10)}
     ${field("nameSpeed", "Name card speed", 4, 120, 1)}
@@ -102,6 +104,7 @@ export function motionMarkup(model) {
     ${field("posterSize", "Login poster size (px)", 80, 480, 10)}
     ${field("posterOpacity", "Login poster opacity", 0.05, 1, 0.05)}
   </form>
+  <ol id="recent-photos"></ol>
   <p class="debug-note">Poster size and opacity show on the login page after a refresh. These values stay in this browser.</p>
 </aside>`;
   const script = `<script type="application/json" id="motion-data">${payload}</script>
@@ -135,6 +138,7 @@ export function motionMarkup(model) {
       settings[input.name] = value;
       localStorage.setItem(KEY, JSON.stringify(settings));
       if (input.name === "nameCards" || input.name === "nameSpeed") syncCards();
+      if (input.name === "recentLimit") paintRecent();
     });
   }
   toggle.addEventListener("click", (event) => {
@@ -222,9 +226,58 @@ export function motionMarkup(model) {
     loadQueue.push({ img, url });
     pumpLoads();
   }
+  const recent = [];
+  function photoName(url) {
+    const clean = String(url || "").split("?")[0].split("#")[0];
+    const parts = clean.split("/");
+    const base = parts[parts.length - 1] || "";
+    try { return decodeURIComponent(base); } catch (error) { return base; }
+  }
+  function recentCap() {
+    return Math.max(1, Math.round(Number(settings.recentLimit) || defaults.recentLimit));
+  }
+  function paintRecent() {
+    const cap = recentCap();
+    while (recent.length > cap) recent.shift();
+    const list = document.getElementById("recent-photos");
+    if (!list) return;
+    list.replaceChildren();
+    recent.forEach((name) => {
+      const item = document.createElement("li");
+      item.textContent = name;
+      list.append(item);
+    });
+  }
+  function remember(name) {
+    if (!name) return;
+    const existing = recent.indexOf(name);
+    if (existing !== -1) recent.splice(existing, 1);
+    recent.push(name);
+    paintRecent();
+  }
+  function pickPhotoUrl() {
+    if (!photos.length) return "";
+    const cap = recentCap();
+    while (recent.length > cap) recent.shift();
+    const blocked = {};
+    recent.forEach((name) => { blocked[name] = true; });
+    const choices = [];
+    photos.forEach((url) => {
+      if (!blocked[photoName(url)]) choices.push(url);
+    });
+    if (choices.length) return choices[Math.floor(Math.random() * choices.length)];
+    if (!recent.length) return photos[Math.floor(Math.random() * photos.length)];
+    recent.shift();
+    paintRecent();
+    return pickPhotoUrl();
+  }
   function queueFloat() {
     const maxPhotos = Math.max(1, Math.round(settings.maxPhotos));
     if (!photos.length || floats.length + floatPending >= maxPhotos) return;
+    const url = pickPhotoUrl();
+    if (!url) return;
+    const fileName = photoName(url);
+    remember(fileName);
     floatPending += 1;
     const img = document.createElement("img");
     img.className = "float-photo";
@@ -234,7 +287,6 @@ export function motionMarkup(model) {
     const angle = Math.random() * Math.PI * 2;
     img.style.left = (8 + Math.random() * 70) + "%";
     img.style.top = (8 + Math.random() * 70) + "%";
-    const url = photos[Math.floor(Math.random() * photos.length)];
     loadQueue.unshift({
       img,
       url,
@@ -250,6 +302,7 @@ export function motionMarkup(model) {
       },
       failed() {
         floatPending -= 1;
+        remember(fileName);
         queueFloat();
       },
     });

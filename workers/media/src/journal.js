@@ -131,6 +131,9 @@ function page(title, main, motion) {
     #motion-form label { display: grid; gap: 0.1rem; }
     #motion-form input { font: inherit; width: 100%; }
     #motion-debug .debug-note { margin: 0.45rem 0 0; opacity: 0.8; }
+    #recent-photos { list-style: disc; margin: 0.45rem 0 0; padding-left: 1.1rem; max-height: 7.5rem; overflow: auto; }
+    #recent-photos:empty { display: none; }
+    #recent-photos li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     header, main { position: relative; z-index: 1; max-width: 42rem; margin: 0 auto; padding: 1.25rem; }
     main { background: rgba(243, 239, 230, 0.88); }
     main:has(#log-panel) { background: transparent; }

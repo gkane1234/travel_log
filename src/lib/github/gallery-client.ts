@@ -30,7 +30,14 @@ export async function uploadGalleryFiles(
   const routes = new Set<string>();
   onStatus("Checking files already on this trip…");
   files.forEach((_, index) => onFile?.(index, "queued"));
-  const hashes = await hashesForMedia(slug, existing);
+  let hashes;
+  try {
+    hashes = await hashesForMedia(slug, existing);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not check files already on this trip.";
+    files.forEach((_, index) => onFile?.(index, "failed", undefined, message));
+    return { added, error: message, skipped };
+  }
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
     const planned = plannedMediaFilename(file.name);

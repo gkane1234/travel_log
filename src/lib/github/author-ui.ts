@@ -17,6 +17,7 @@ import { hashesForMedia, mediaDuplicate, rememberMediaHash, sha256Hex, skippedNo
 import { makePoster, posterObjectKey } from "./poster.ts";
 import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
 import { dateRangeRefusal, dayNotesOutsideRange, type DayNote } from "./trip-details.ts";
+import { filesFromTransfer } from "./drop-files.ts";
 import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 import { beginUploadList } from "./upload-progress.ts";
 
@@ -667,7 +668,15 @@ export function mountAuthor(root: HTMLElement): void {
     const problems: string[] = [];
     const skipped: string[] = [];
     setStatus("Checking files already on this trip…");
-    const hashes = await hashesForMedia(trip.slug, photos);
+    let hashes;
+    try {
+      hashes = await hashesForMedia(trip.slug, photos);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not check files already on this trip.";
+      files.forEach((_, index) => progress.update(index, "failed", { note: message }));
+      setStatus(message, true);
+      return;
+    }
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
       const planned = plannedMediaFilename(file.name);
@@ -1071,6 +1080,7 @@ export function mountAuthor(root: HTMLElement): void {
     for (const eventName of ["dragenter", "dragover"]) {
       zone.addEventListener(eventName, (event) => {
         event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
         zone.classList.add("dragover");
       });
     }
@@ -1081,8 +1091,9 @@ export function mountAuthor(root: HTMLElement): void {
     zone.addEventListener("drop", (event) => {
       event.preventDefault();
       zone.classList.remove("dragover");
-      const files = event.dataTransfer?.files;
-      if (files?.length) onFiles([...files]);
+      void filesFromTransfer(event.dataTransfer).then((files) => {
+        if (files.length) onFiles(files);
+      });
     });
   }
 

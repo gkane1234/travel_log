@@ -6,11 +6,12 @@ export function mediaWorkerOrigin(workerUrl: string): string {
   return base;
 }
 
-export type SignedUpload = {
-  uploadUrl: string;
-  publicUrl: string;
-  headers?: Record<string, string>;
-};
+/** Same-origin worker path. The browser must not PUT to the bucket host. */
+export function mediaUploadUrl(workerUrl: string, objectKey: string): string {
+  const origin = mediaWorkerOrigin(workerUrl);
+  const encoded = objectKey.split("/").map((part) => encodeURIComponent(part)).join("/");
+  return `${origin}/travel-log/${encoded}`;
+}
 
 export async function uploadToBucket(options: {
   workerUrl: string;
@@ -30,73 +31,45 @@ export async function uploadToBucket(options: {
   if (!options.token && !same) {
     throw new Error("Sign in to the travel log before adding photos.");
   }
-
-  let signed: SignedUpload;
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (options.token) headers.Authorization = `Bearer ${options.token}`;
-    const response = await fetch(`${workerUrl}/travel-log/sign`, {
-      method: "POST",
-      credentials: same ? "include" : "omit",
-      headers,
-      body: JSON.stringify({
-        key: options.objectKey,
-        contentType: options.contentType,
-        contentLength: options.bytes.byteLength,
-      }),
-    });
-    const data = (await response.json().catch(() => ({}))) as { error?: string; uploadUrl?: string; publicUrl?: string; headers?: Record<string, string> };
-    if (!response.ok) {
-      throw new Error(data.error || "Media storage refused the upload.");
-    }
-    if (!data.uploadUrl || !data.publicUrl) {
-      throw new Error("Media storage did not return an upload address.");
-    }
-    signed = { uploadUrl: data.uploadUrl, publicUrl: data.publicUrl, headers: data.headers };
-  } catch (error) {
-    if (error instanceof Error) throw error;
-    throw new Error("Could not reach media storage.");
-  }
-
-  const headers = { ...(signed.headers ?? { "content-type": options.contentType }) };
-  delete headers["content-length"];
-  if (options.onProgress) {
-    await putWithProgress(signed.uploadUrl, headers, options.bytes, options.onProgress, options.objectKey);
-  } else {
-    const put = await fetch(signed.uploadUrl, {
-      method: "PUT",
-      headers,
-      body: options.bytes,
-    });
-    if (!put.ok) {
-      throw new Error(`Upload of ${options.objectKey.split("/").pop()} failed (${put.status}). The note was not saved.`);
-    }
-  }
-  if (!/^https?:\/\//i.test(signed.publicUrl)) {
-    throw new Error("Media storage did not return a public http(s) URL.");
-  }
-  return signed.publicUrl;
+  const uploadUrl = mediaUploadUrl(workerUrl, options.objectKey);
+  const headers: Record<string, string> = { "content-type": options.contentType };
+  if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  await putWithProgress(uploadUrl, headers, options.bytes, options.onProgress, options.objectKey, same);
+  return uploadUrl;
 }
 
 function putWithProgress(
   url: string,
   headers: Record<string, string>,
   bytes: Uint8Array,
-  onProgress: (ratio: number) => void,
+  onProgress: ((ratio: number) => void) | undefined,
   objectKey: string,
+  sameOrigin: boolean,
 ): Promise<void> {
+  const name = objectKey.split("/").pop() || "file";
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
+    xhr.withCredentials = sameOrigin;
     for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value);
     xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+      if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total);
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`Upload of ${objectKey.split("/").pop()} failed (${xhr.status}). The note was not saved.`));
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(1);
+        resolve();
+        return;
+      }
+      let message = "";
+      try {
+        message = String(JSON.parse(xhr.responseText).error || "");
+      } catch {
+        message = "";
+      }
+      reject(new Error(message || `Upload of ${name} failed (${xhr.status}). The note was not saved.`));
     };
-    xhr.onerror = () => reject(new Error(`Upload of ${objectKey.split("/").pop()} failed. The note was not saved.`));
+    xhr.onerror = () => reject(new Error(`Upload of ${name} failed. The note was not saved.`));
     xhr.send(bytes);
   });
 }

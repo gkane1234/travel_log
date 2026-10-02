@@ -7,7 +7,8 @@ export type UploadRowUpdate = {
 
 function previewUrl(file: File): string {
   try {
-    return URL.createObjectURL(file);
+    const url = URL.createObjectURL(file);
+    return url.startsWith("blob:") ? url : "";
   } catch {
     return "";
   }

@@ -136,6 +136,37 @@ async function showLogin(env, next, error) {
   return loginPage(next, error, stage);
 }
 
+function objectKeyFromPath(path) {
+  const raw = path.slice(`${PUBLIC_PREFIX}/`.length);
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function putMediaObject(request, env, url, path) {
+  const auth = await canEditNotes(request, env);
+  if (!auth.ok) return cors(json({ error: auth.error }, auth.status || 401));
+  if (!env.TRIPS) return cors(json({ error: "Trip storage is not configured." }, 503));
+  const key = objectKeyFromPath(path);
+  const contentType = (request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const poster = isPosterKey(key);
+  if (!poster && !isAllowedKey(key)) return cors(json({ error: "Invalid object key." }, 400));
+  if (poster) {
+    if (contentType !== "image/jpeg") return cors(json({ error: "Posters must be JPEG." }, 400));
+    const bytes = await request.arrayBuffer();
+    if (bytes.byteLength < 1 || bytes.byteLength > POSTER_MAX_BYTES) {
+      return cors(json({ error: "Poster is too large." }, 400));
+    }
+    await env.TRIPS.put(key, bytes, { httpMetadata: { contentType: "image/jpeg" } });
+  } else {
+    if (!isAllowedType(contentType)) return cors(json({ error: "Unsupported media type." }, 400));
+    await env.TRIPS.put(key, request.body, { httpMetadata: { contentType } });
+  }
+  return cors(json({ ok: true, publicUrl: `${url.origin}${PUBLIC_PREFIX}/${key}` }, 200));
+}
+
 async function servePoster(env, key) {
   if (!isPosterKey(key) || !env.TRIPS) return json({ error: "Not found" }, 404);
   const object = await env.TRIPS.get(key);
@@ -347,6 +378,10 @@ export default {
         httpMetadata: { contentType: "text/markdown; charset=utf-8" },
       });
       return cors(json({ ok: true, cover }, 200));
+    }
+
+    if (request.method === "PUT" && path.startsWith(`${PUBLIC_PREFIX}/`)) {
+      return putMediaObject(request, env, url, path);
     }
 
     if (request.method !== "POST" || path !== `${PUBLIC_PREFIX}/sign`) {

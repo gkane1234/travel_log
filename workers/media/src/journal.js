@@ -453,7 +453,7 @@ function tripViewer(slug) {
       preview.className = "upload-preview";
       const url = URL.createObjectURL(file);
       const video = (file.type || "").indexOf("video/") === 0 || /\\.(mp4|m4v|webm|mov)$/i.test(file.name);
-      if (video) {
+      if (String(url).indexOf("blob:") === 0 && video) {
         const node = document.createElement("video");
         node.src = url;
         node.muted = true;
@@ -462,7 +462,7 @@ function tripViewer(slug) {
         node.width = 96;
         node.height = 72;
         preview.append(node);
-      } else {
+      } else if (String(url).indexOf("blob:") === 0) {
         const node = document.createElement("img");
         node.src = url;
         node.alt = "";
@@ -524,6 +524,40 @@ function tripViewer(slug) {
       },
     };
   }
+  function wantedFile(file) {
+    if (!file) return false;
+    const type = file.type || "";
+    if (type.indexOf("image/") === 0 || type.indexOf("video/") === 0) return true;
+    return /\\.(heic|heif|jpe?g|png|webp|gif|mov|mp4|m4v|webm)$/i.test(file.name || "");
+  }
+  function fileFromItem(item) {
+    return new Promise((resolve) => {
+      if (!item || item.kind !== "file") {
+        resolve(null);
+        return;
+      }
+      const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+      if (entry && entry.isFile && entry.file) {
+        entry.file((file) => resolve(file), () => resolve(item.getAsFile ? item.getAsFile() : null));
+        return;
+      }
+      resolve(item.getAsFile ? item.getAsFile() : null);
+    });
+  }
+  async function filesFromDrop(transfer) {
+    const found = [];
+    const items = transfer && transfer.items ? Array.from(transfer.items) : [];
+    for (const item of items) {
+      const file = await fileFromItem(item);
+      if (wantedFile(file)) found.push(file);
+    }
+    if (!found.length && transfer && transfer.files && transfer.files.length) {
+      Array.from(transfer.files).forEach((file) => {
+        if (wantedFile(file)) found.push(file);
+      });
+    }
+    return found;
+  }
   async function send(files) {
     if (!files.length || busy) return;
     busy = true;
@@ -556,6 +590,7 @@ function tripViewer(slug) {
     ["dragenter", "dragover"].forEach((name) => {
       drop.addEventListener(name, (event) => {
         event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
         drop.classList.add("dragover");
       });
     });
@@ -566,8 +601,7 @@ function tripViewer(slug) {
     drop.addEventListener("drop", (event) => {
       event.preventDefault();
       drop.classList.remove("dragover");
-      const list = event.dataTransfer && event.dataTransfer.files ? Array.from(event.dataTransfer.files) : [];
-      void send(list);
+      void filesFromDrop(event.dataTransfer).then((list) => send(list));
     });
   }
 })();

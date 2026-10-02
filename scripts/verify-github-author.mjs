@@ -19,7 +19,9 @@ import {
 import { convertHeicFile, plannedMediaFilename } from "../src/lib/github/media.ts";
 import { reencodePhoto } from "../src/lib/github/strip-photo.ts";
 import { POSTER_MAX_BYTES, isPosterKey, mediaPublicUrl, storageConfigError } from "../workers/media/src/config.js";
-import { mediaWorkerOrigin } from "../src/lib/github/upload.ts";
+import { mediaWorkerOrigin, mediaUploadUrl } from "../src/lib/github/upload.ts";
+import { isDroppedMedia } from "../src/lib/github/drop-files.ts";
+import worker from "../workers/media/src/index.js";
 import { checkLogin, loginPage, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
 import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
 import { posterStage } from "../workers/media/src/motion.js";
@@ -158,6 +160,52 @@ assert.equal(
 assert.equal(mediaWorkerOrigin("https://gabriel-kane.com/travel-log"), "https://gabriel-kane.com");
 assert.equal(mediaWorkerOrigin("https://gabriel-kane.com/travel_log"), "https://gabriel-kane.com");
 assert.equal(`${mediaWorkerOrigin("https://gabriel-kane.com")}/travel-log/sign`, "https://gabriel-kane.com/travel-log/sign");
+assert.equal(
+  mediaUploadUrl("https://gabriel-kane.com", "media/olympic-peninsula/photos/shore.jpg"),
+  "https://gabriel-kane.com/travel-log/media/olympic-peninsula/photos/shore.jpg",
+);
+const uploadSource = readFileSync(new URL("../src/lib/github/upload.ts", import.meta.url), "utf8");
+assert.equal(uploadSource.includes("r2.cloudflarestorage.com"), false);
+assert.equal(uploadSource.includes("/travel-log/sign"), false);
+assert.match(uploadSource, /xhr\.open\("PUT"/);
+assert.match(uploadSource, /\/travel-log\//);
+assert.equal(isDroppedMedia(new File(["a"], "pic.jpg", { type: "image/jpeg" })), true);
+assert.equal(isDroppedMedia(new File(["a"], "clip.mp4", { type: "video/mp4" })), true);
+assert.equal(isDroppedMedia(new File(["a"], "IMG.HEIC", { type: "" })), true);
+assert.equal(isDroppedMedia(new File(["a"], "note.txt", { type: "text/plain" })), false);
+const storedUploads = new Map();
+const uploadEnv = {
+  MEDIA_PASSWORD: "not-a-real-secret",
+  TRIPS: {
+    async put(key, body, options) {
+      const bytes = body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(await new Response(body).arrayBuffer());
+      storedUploads.set(key, { bytes, type: options?.httpMetadata?.contentType || "" });
+    },
+  },
+};
+const uploadCookie = login.cookie.split(";")[0];
+const putPhoto = await worker.fetch(
+  new Request("https://gabriel-kane.com/travel-log/media/olympic-peninsula/photos/shore.jpg", {
+    method: "PUT",
+    headers: { Cookie: uploadCookie, "Content-Type": "image/jpeg" },
+    body: new Uint8Array([1, 2, 3]),
+  }),
+  uploadEnv,
+);
+assert.equal(putPhoto.status, 200);
+const putPhotoBody = await putPhoto.json();
+assert.equal(putPhotoBody.publicUrl, "https://gabriel-kane.com/travel-log/media/olympic-peninsula/photos/shore.jpg");
+assert.equal(storedUploads.get("media/olympic-peninsula/photos/shore.jpg").type, "image/jpeg");
+assert.equal(storedUploads.get("media/olympic-peninsula/photos/shore.jpg").bytes.length, 3);
+const deniedPut = await worker.fetch(
+  new Request("https://gabriel-kane.com/travel-log/media/olympic-peninsula/photos/shore.jpg", {
+    method: "PUT",
+    headers: { "Content-Type": "image/jpeg" },
+    body: new Uint8Array([1]),
+  }),
+  uploadEnv,
+);
+assert.equal(deniedPut.status, 401);
 const allowed = await respondToMediaGet(
   new Request("https://trips.example/media/olympic-peninsula/shore.jpg", {
     headers: { Cookie: login.cookie.split(";")[0] },
@@ -299,6 +347,9 @@ assert.match(tripHtml, /id="lightbox-close"/);
 assert.match(tripHtml, /closest\("\.gallery-item, \.note-media"\)/);
 assert.match(tripHtml, /event\.target === box \|\| event\.target === frame/);
 assert.match(tripHtml, /travelLogUploadGallery/);
+assert.match(tripHtml, /transfer\.items/);
+assert.match(tripHtml, /getAsFile/);
+assert.match(tripHtml, /webkitGetAsEntry/);
 assert.equal(tripHtml.includes("shore.gpx"), false);
 assert.equal(tripHtml.includes("shoreline.gpx"), false);
 assert.match(tripHtml, /id="lightbox"/);
@@ -445,7 +496,14 @@ assert.match(authorUi, /path: trip\.indexPath/);
 assert.match(authorUi, /setAddOpen\(false\)/);
 assert.match(authorUi, /bindFileDrop\(addDrop/);
 assert.match(authorUi, /dblclick/);
+assert.match(authorUi, /filesFromTransfer/);
+assert.match(authorUi, /media-input/);
 assert.match(authorUi, /openPhotoPreview/);
+const dropSource = readFileSync(new URL("../src/lib/github/drop-files.ts", import.meta.url), "utf8");
+assert.match(dropSource, /getAsFile/);
+assert.match(dropSource, /webkitGetAsEntry/);
+assert.match(dropSource, /transfer\.items/);
+assert.equal(dropSource.includes("file://"), false);
 assert.match(authorUi, /className = "pool-thumb"/);
 assert.match(authorUi, /beginUploadList/);
 assert.match(authorUi, /setTimeout\(\(\) => \{/);

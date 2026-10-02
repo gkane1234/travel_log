@@ -22,44 +22,56 @@ export async function uploadGalleryFiles(
   files: File[],
   existing: Set<string>,
   onStatus: (message: string) => void,
+  onFile?: (index: number, phase: "queued" | "preparing" | "uploading" | "done" | "skipped" | "failed", ratio?: number, note?: string) => void,
 ): Promise<GalleryUploadResult> {
   const added: GalleryUpload[] = [];
   const problems: string[] = [];
   const skipped: string[] = [];
   const routes = new Set<string>();
   onStatus("Checking files already on this trip…");
+  files.forEach((_, index) => onFile?.(index, "queued"));
   const hashes = await hashesForMedia(slug, existing);
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
     const planned = plannedMediaFilename(file.name);
     if (planned && mediaDuplicate(planned, "", existing, hashes)) {
       skipped.push(file.name);
+      onFile?.(index, "skipped", undefined, skippedNote(file.name));
       onStatus(skippedNote(file.name));
       continue;
     }
+    onFile?.(index, "preparing");
     onStatus(`Preparing ${index + 1} of ${files.length}: ${file.name}`);
     let prepared;
     try {
       prepared = await prepareDroppedFile(file, slug, existing, routes);
     } catch (error) {
-      problems.push(error instanceof Error ? error.message : `Could not add ${file.name}.`);
+      const message = error instanceof Error ? error.message : `Could not add ${file.name}.`;
+      problems.push(message);
+      onFile?.(index, "failed", undefined, message);
       continue;
     }
     if (prepared.kind !== "photo" && prepared.kind !== "video") {
-      problems.push(`${file.name} is not a photo or video.`);
+      const message = `${file.name} is not a photo or video.`;
+      problems.push(message);
+      onFile?.(index, "failed", undefined, message);
       continue;
     }
     if (!prepared.objectKey || !prepared.contentType) {
-      problems.push(`Could not prepare ${file.name}.`);
+      const message = `Could not prepare ${file.name}.`;
+      problems.push(message);
+      onFile?.(index, "failed", undefined, message);
       continue;
     }
     const hash = await sha256Hex(prepared.bytes);
     if (mediaDuplicate("", hash, existing, hashes)) {
       existing.delete(prepared.filename);
       skipped.push(file.name);
+      onFile?.(index, "skipped", undefined, skippedNote(file.name));
       onStatus(skippedNote(file.name));
       continue;
     }
+    onFile?.(index, "uploading", 0);
     onStatus(`Uploading ${index + 1} of ${files.length}: ${prepared.filename}`);
     try {
       await uploadToBucket({
@@ -68,9 +80,12 @@ export async function uploadGalleryFiles(
         objectKey: prepared.objectKey,
         bytes: prepared.bytes,
         contentType: prepared.contentType,
+        onProgress: (ratio) => onFile?.(index, "uploading", ratio),
       });
     } catch (error) {
-      problems.push(error instanceof Error ? error.message : `Upload of ${file.name} failed.`);
+      const message = error instanceof Error ? error.message : `Upload of ${file.name} failed.`;
+      problems.push(message);
+      onFile?.(index, "failed", undefined, message);
       continue;
     }
     let posterFailed = false;
@@ -96,6 +111,7 @@ export async function uploadGalleryFiles(
     });
     hashes.set(hash, prepared.filename);
     rememberMediaHash(slug, prepared.filename, hash);
+    onFile?.(index, "done", 1, posterFailed ? "Done. Login poster failed." : "Done");
   }
   return { added, error: problems[0] || "", skipped };
 }

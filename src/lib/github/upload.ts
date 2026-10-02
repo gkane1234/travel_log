@@ -18,6 +18,7 @@ export async function uploadToBucket(options: {
   objectKey: string;
   bytes: Uint8Array;
   contentType: string;
+  onProgress?: (ratio: number) => void;
 }): Promise<string> {
   const workerUrl = mediaWorkerOrigin(options.workerUrl);
   if (!workerUrl) {
@@ -57,18 +58,47 @@ export async function uploadToBucket(options: {
     throw new Error("Could not reach media storage.");
   }
 
-  const put = await fetch(signed.uploadUrl, {
-    method: "PUT",
-    headers: signed.headers ?? { "content-type": options.contentType },
-    body: options.bytes,
-  });
-  if (!put.ok) {
-    throw new Error(`Upload of ${options.objectKey.split("/").pop()} failed (${put.status}). The note was not saved.`);
+  const headers = { ...(signed.headers ?? { "content-type": options.contentType }) };
+  delete headers["content-length"];
+  if (options.onProgress) {
+    await putWithProgress(signed.uploadUrl, headers, options.bytes, options.onProgress, options.objectKey);
+  } else {
+    const put = await fetch(signed.uploadUrl, {
+      method: "PUT",
+      headers,
+      body: options.bytes,
+    });
+    if (!put.ok) {
+      throw new Error(`Upload of ${options.objectKey.split("/").pop()} failed (${put.status}). The note was not saved.`);
+    }
   }
   if (!/^https?:\/\//i.test(signed.publicUrl)) {
     throw new Error("Media storage did not return a public http(s) URL.");
   }
   return signed.publicUrl;
+}
+
+function putWithProgress(
+  url: string,
+  headers: Record<string, string>,
+  bytes: Uint8Array,
+  onProgress: (ratio: number) => void,
+  objectKey: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`Upload of ${objectKey.split("/").pop()} failed (${xhr.status}). The note was not saved.`));
+    };
+    xhr.onerror = () => reject(new Error(`Upload of ${objectKey.split("/").pop()} failed. The note was not saved.`));
+    xhr.send(bytes);
+  });
 }
 
 export type TripNote = { path: string; text: string | null };

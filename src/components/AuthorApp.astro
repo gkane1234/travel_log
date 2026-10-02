@@ -179,6 +179,17 @@ const { slug = "" } = Astro.props;
           <input id="media-input" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" />
         </label>
       </div>
+      <ol id="upload-progress" class="upload-progress" hidden></ol>
+      <template id="upload-file-template">
+        <li class="upload-file">
+          <span class="upload-preview"></span>
+          <span class="upload-body">
+            <span class="upload-name"></span>
+            <progress max="1" value="0"></progress>
+            <span class="upload-note">Queued</span>
+          </span>
+        </li>
+      </template>
       <button type="button" id="add-photos-close" class="linkish">Close</button>
     </div>
 
@@ -428,6 +439,97 @@ const { slug = "" } = Astro.props;
     font-size: 0.75rem;
     line-height: 1.3;
     word-break: break-word;
+  }
+  #media-pool {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 7.5rem);
+    gap: 0.45rem;
+  }
+  button.pool-thumb {
+    display: block;
+    width: 7.5rem;
+    height: 5.625rem;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: #e4ddd0;
+  }
+  button.pool-thumb img,
+  button.pool-thumb video {
+    width: 7.5rem;
+    height: 5.625rem;
+    max-width: 7.5rem;
+    max-height: 5.625rem;
+    object-fit: cover;
+    margin: 0;
+    display: block;
+    pointer-events: none;
+  }
+  .thumb-tip {
+    position: fixed;
+    z-index: 8;
+    max-width: 16rem;
+    padding: 0.25rem 0.45rem;
+    background: #1c241e;
+    color: #f3efe6;
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    line-height: 1.3;
+    pointer-events: none;
+  }
+  .thumb-tip[hidden] {
+    display: none;
+  }
+  .upload-progress {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0.75rem;
+    display: grid;
+    gap: 0.45rem;
+  }
+  .upload-file {
+    display: grid;
+    grid-template-columns: 6rem 1fr;
+    gap: 0.55rem;
+    align-items: center;
+  }
+  .upload-preview {
+    width: 6rem;
+    height: 4.5rem;
+    overflow: hidden;
+    background: #e4ddd0;
+  }
+  .upload-preview img,
+  .upload-preview video {
+    width: 6rem;
+    height: 4.5rem;
+    max-width: 6rem;
+    max-height: 4.5rem;
+    object-fit: cover;
+    margin: 0;
+    display: block;
+  }
+  .upload-body {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+  .upload-name {
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .upload-note {
+    font-size: 0.75rem;
+  }
+  .upload-file[data-phase="failed"] .upload-note {
+    color: #8a2f2f;
+  }
+  .upload-progress progress {
+    width: 100%;
   }
   #save-cover {
     font-size: 0.9rem;

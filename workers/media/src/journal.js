@@ -156,6 +156,15 @@ function page(title, main, motion) {
     .add-media input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
     .file-drop { border: 1px dashed #8a8175; padding: 0.8rem; margin: 0.4rem 0 0.6rem; display: grid; gap: 0.55rem; justify-items: start; }
     .file-drop.dragover { outline: 2px solid #2e4a3e; }
+    .upload-progress { list-style: none; padding: 0; margin: 0.4rem 0 0.7rem; display: grid; gap: 0.45rem; }
+    .upload-file { display: grid; grid-template-columns: 6rem 1fr; gap: 0.55rem; align-items: center; }
+    .upload-preview { width: 6rem; height: 4.5rem; overflow: hidden; background: #e4ddd0; }
+    .upload-preview img, .upload-preview video { width: 6rem; height: 4.5rem; max-width: 6rem; max-height: 4.5rem; object-fit: cover; margin: 0; display: block; }
+    .upload-body { display: grid; gap: 0.15rem; min-width: 0; }
+    .upload-name { font-family: "Segoe UI", sans-serif; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .upload-note { font-family: "Segoe UI", sans-serif; font-size: 0.75rem; }
+    .upload-file[data-phase="failed"] .upload-note { color: #8a2f2f; }
+    progress { width: 100%; }
     .file-drop p { margin: 0; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; }
     #lightbox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(28, 36, 30, 0.9); }
     #lightbox[hidden] { display: none; }
@@ -334,7 +343,7 @@ function galleryMarkup(items) {
     })
     .join("");
   const grid = tiles ? `<div class="gallery-grid">${tiles}</div>` : "";
-  return `<section class="gallery" aria-label="Photos and videos"><div class="gallery-bar"><h2>Photos and videos</h2></div><div id="gallery-drop" class="file-drop"><p>Drop photos and videos here</p><label class="add-media">Choose photos and videos<input id="gallery-add" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" /></label></div><p id="gallery-status" class="meta"></p>${grid}</section>`;
+  return `<section class="gallery" aria-label="Photos and videos"><div class="gallery-bar"><h2>Photos and videos</h2></div><div id="gallery-drop" class="file-drop"><p>Drop photos and videos here</p><label class="add-media">Choose photos and videos<input id="gallery-add" type="file" multiple accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.mov,.mp4,.m4v,.webm" /></label></div><ol id="gallery-progress" class="upload-progress" hidden></ol><p id="gallery-status" class="meta"></p>${grid}</section>`;
 }
 
 function tripViewer(slug) {
@@ -428,12 +437,100 @@ function tripViewer(slug) {
     if (!window.travelLogUploadGallery) throw new Error("Could not load the photo uploader.");
     return window.travelLogUploadGallery;
   }
+  function showUpload(files) {
+    const list = document.getElementById("gallery-progress");
+    if (!list) return { update() {} };
+    list.querySelectorAll("img, video").forEach((node) => {
+      const src = node.getAttribute("src") || "";
+      if (src.indexOf("blob:") === 0) URL.revokeObjectURL(src);
+    });
+    list.replaceChildren();
+    list.hidden = false;
+    const rows = files.map((file) => {
+      const row = document.createElement("li");
+      row.className = "upload-file";
+      const preview = document.createElement("span");
+      preview.className = "upload-preview";
+      const url = URL.createObjectURL(file);
+      const video = (file.type || "").indexOf("video/") === 0 || /\\.(mp4|m4v|webm|mov)$/i.test(file.name);
+      if (video) {
+        const node = document.createElement("video");
+        node.src = url;
+        node.muted = true;
+        node.playsInline = true;
+        node.preload = "metadata";
+        node.width = 96;
+        node.height = 72;
+        preview.append(node);
+      } else {
+        const node = document.createElement("img");
+        node.src = url;
+        node.alt = "";
+        node.width = 96;
+        node.height = 72;
+        preview.append(node);
+      }
+      const body = document.createElement("span");
+      body.className = "upload-body";
+      const name = document.createElement("span");
+      name.className = "upload-name";
+      name.textContent = file.name;
+      const bar = document.createElement("progress");
+      bar.max = 1;
+      bar.value = 0;
+      const note = document.createElement("span");
+      note.className = "upload-note";
+      note.textContent = "Queued";
+      body.append(name, bar, note);
+      row.append(preview, body);
+      list.append(row);
+      return row;
+    });
+    return {
+      update(index, phase, ratio, message) {
+        const row = rows[index];
+        if (!row) return;
+        row.dataset.phase = phase;
+        const bar = row.querySelector("progress");
+        const note = row.querySelector(".upload-note");
+        if (phase === "skipped") {
+          if (bar) bar.hidden = true;
+          if (note) note.textContent = message || "Skipped because it is already there.";
+          return;
+        }
+        if (phase === "failed") {
+          if (bar) { bar.hidden = false; bar.value = 0; }
+          if (note) note.textContent = message || "Failed";
+          return;
+        }
+        if (bar) bar.hidden = false;
+        if (phase === "done") {
+          if (bar) bar.value = 1;
+          if (note) note.textContent = message || "Done";
+          return;
+        }
+        if (phase === "uploading") {
+          if (bar && typeof ratio === "number") bar.value = ratio;
+          if (note) note.textContent = "Uploading";
+          return;
+        }
+        if (phase === "preparing") {
+          if (bar) bar.removeAttribute("value");
+          if (note) note.textContent = "Preparing";
+          return;
+        }
+        if (bar) bar.value = 0;
+        if (note) note.textContent = "Queued";
+      },
+    };
+  }
   async function send(files) {
     if (!files.length || busy) return;
     busy = true;
+    const rows = showUpload(files);
     try {
       const upload = await uploader();
-      const result = await upload(slug, files, names(), say);
+      const result = await upload(slug, files, names(), say, rows.update);
       result.added.forEach(tile);
       const skipped = result.skipped || [];
       const skipNote = skipped.map((name) => "Skipped " + name + " because it is already there.").join(" ");

@@ -18,6 +18,7 @@ import { makePoster, posterObjectKey } from "./poster.ts";
 import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
 import { dateRangeRefusal, dayNotesOutsideRange, type DayNote } from "./trip-details.ts";
 import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
+import { beginUploadList } from "./upload-progress.ts";
 
 type PreparedRoute = { repoPath: string; bytes: Uint8Array };
 
@@ -109,6 +110,13 @@ export function mountAuthor(root: HTMLElement): void {
   const createDrop = must<HTMLElement>(root, "create-drop");
   const mediaPool = must<HTMLElement>(root, "media-pool");
   const poolHint = must<HTMLElement>(root, "pool-hint");
+  const uploadList = must<HTMLOListElement>(root, "upload-progress");
+  const uploadTemplate = must<HTMLTemplateElement>(root, "upload-file-template");
+  const thumbTip = document.createElement("span");
+  thumbTip.className = "thumb-tip";
+  thumbTip.hidden = true;
+  root.append(thumbTip);
+  let thumbTipTimer = 0;
   const createMedia = must<HTMLInputElement>(root, "create-media");
   let selectedCover = "";
   let poolItems: PoolItem[] = [];
@@ -404,7 +412,7 @@ export function mountAuthor(root: HTMLElement): void {
     for (const item of poolItems) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "cover-choice";
+      button.className = "pool-thumb";
       button.draggable = true;
       button.dataset.path = item.path;
       const src = gatedMediaUrl(trip.slug, item.filename);
@@ -414,7 +422,8 @@ export function mountAuthor(root: HTMLElement): void {
         video.muted = true;
         video.playsInline = true;
         video.preload = "metadata";
-        video.setAttribute("aria-label", item.filename);
+        video.width = 120;
+        video.height = 90;
         video.addEventListener("loadeddata", () => {
           try {
             if (video.currentTime < 0.01) video.currentTime = 0.1;
@@ -426,9 +435,25 @@ export function mountAuthor(root: HTMLElement): void {
       } else if (src) {
         const img = document.createElement("img");
         img.src = src;
-        img.alt = item.filename;
+        img.alt = "";
+        img.width = 120;
+        img.height = 90;
         button.append(img);
       }
+      button.addEventListener("pointerenter", () => {
+        window.clearTimeout(thumbTipTimer);
+        thumbTipTimer = window.setTimeout(() => {
+          thumbTip.textContent = item.filename;
+          const rect = button.getBoundingClientRect();
+          thumbTip.style.left = `${rect.left}px`;
+          thumbTip.style.top = `${rect.bottom + 6}px`;
+          thumbTip.hidden = false;
+        }, 700);
+      });
+      button.addEventListener("pointerleave", () => {
+        window.clearTimeout(thumbTipTimer);
+        thumbTip.hidden = true;
+      });
       button.addEventListener("dblclick", (event) => {
         event.preventDefault();
         openPhotoPreview(item);
@@ -632,6 +657,8 @@ export function mountAuthor(root: HTMLElement): void {
       return;
     }
     uploading = true;
+    setAddOpen(true);
+    const progress = beginUploadList(uploadList, uploadTemplate, files);
     try {
     const photos = knownMediaNames();
     const routes = filenamesIn(paths, trip.slug, "routes");
@@ -646,35 +673,47 @@ export function mountAuthor(root: HTMLElement): void {
       const planned = plannedMediaFilename(file.name);
       if (planned && mediaDuplicate(planned, "", photos, hashes)) {
         skipped.push(file.name);
+        progress.update(index, "skipped", { note: skippedNote(file.name) });
         setStatus(skippedNote(file.name));
         continue;
       }
+      progress.update(index, "preparing");
       setStatus(`Preparing ${index + 1} of ${files.length}: ${file.name}`);
       let prepared;
       try {
         prepared = await prepareDroppedFile(file, trip.slug, photos, routes);
       } catch (error) {
-        problems.push(error instanceof Error ? error.message : `Could not add ${file.name}.`);
+        const message = error instanceof Error ? error.message : `Could not add ${file.name}.`;
+        problems.push(message);
+        progress.update(index, "failed", { note: message });
         continue;
       }
       if (prepared.kind === "route" && prepared.repoPath) {
         insertAtCursor(bodyEl, prepared.markdown);
         dirty = true;
         await saveWithFiles([{ repoPath: prepared.repoPath, bytes: prepared.bytes }]);
+        progress.update(index, "done", { note: "Added" });
         continue;
       }
-      if (prepared.kind !== "photo" && prepared.kind !== "video") continue;
+      if (prepared.kind !== "photo" && prepared.kind !== "video") {
+        progress.update(index, "failed", { note: `${file.name} is not a photo or video.` });
+        continue;
+      }
       if (!prepared.objectKey || !prepared.contentType) {
-        problems.push(`Could not prepare ${file.name}.`);
+        const message = `Could not prepare ${file.name}.`;
+        problems.push(message);
+        progress.update(index, "failed", { note: message });
         continue;
       }
       const hash = await sha256Hex(prepared.bytes);
       if (mediaDuplicate("", hash, photos, hashes)) {
         photos.delete(prepared.filename);
         skipped.push(file.name);
+        progress.update(index, "skipped", { note: skippedNote(file.name) });
         setStatus(skippedNote(file.name));
         continue;
       }
+      progress.update(index, "uploading", { ratio: 0 });
       setStatus(`Uploading ${index + 1} of ${files.length}: ${prepared.filename}`);
       try {
         await uploadToBucket({
@@ -683,6 +722,7 @@ export function mountAuthor(root: HTMLElement): void {
           objectKey: prepared.objectKey,
           bytes: prepared.bytes,
           contentType: prepared.contentType,
+          onProgress: (ratio) => progress.update(index, "uploading", { ratio }),
         });
         if (prepared.kind === "photo") {
           try {
@@ -714,9 +754,14 @@ export function mountAuthor(root: HTMLElement): void {
         uploaded += 1;
         hashes.set(hash, prepared.filename);
         rememberMediaHash(trip.slug, prepared.filename, hash);
+        progress.update(index, "done", {
+          note: posterWarning ? "Done. Login poster failed." : "Done",
+        });
         renderPool();
       } catch (error) {
-        problems.push(error instanceof Error ? error.message : `Upload of ${file.name} failed.`);
+        const message = error instanceof Error ? error.message : `Upload of ${file.name} failed.`;
+        problems.push(message);
+        progress.update(index, "failed", { note: message });
       }
     }
     try {

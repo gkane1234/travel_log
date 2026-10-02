@@ -1,7 +1,6 @@
 import { AwsClient } from "aws4fetch";
 import { POSTER_MAX_BYTES, PUBLIC_PREFIX, isAllowedKey, isAllowedType, isPosterKey, mediaPublicUrl, storageConfigError } from "./config.js";
-import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "./journal.js";
-import { posterStage } from "./motion.js";
+import { isTripCoverPath, renderJournal, setCoverFrontmatter, streamLoginPosters } from "./journal.js";
 import { listTripNoteKeys, putTripNotes, readTripNotes } from "./notes.js";
 import { checkLogin, loginPage, logoutSetCookie, mediaGate, safeNext } from "./gate.js";
 
@@ -126,14 +125,8 @@ function requestPath(url) {
   return url.pathname.replace(/\/+$/, "") || "/";
 }
 
-async function showLogin(env, next, error) {
-  let stage = "";
-  try {
-    if (env.TRIPS) stage = posterStage(await publicTripCards(env.TRIPS));
-  } catch {
-    stage = "";
-  }
-  return loginPage(next, error, stage);
+function showLogin(env, next, error) {
+  return loginPage(next, error);
 }
 
 function objectKeyFromPath(path) {
@@ -256,6 +249,14 @@ export default {
     if (underLog && request.method === "GET" && path.startsWith(`${PUBLIC_PREFIX}/posters/`)) {
       const key = decodeURIComponent(path.slice(`${PUBLIC_PREFIX}/`.length));
       return servePoster(env, key);
+    }
+    if (underLog && request.method === "GET" && path === `${PUBLIC_PREFIX}/login-posters`) {
+      if (!env.TRIPS) {
+        return new Response("", {
+          headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "private, no-store" },
+        });
+      }
+      return streamLoginPosters(env.TRIPS);
     }
     if (underLog && request.method === "GET" && path !== `${PUBLIC_PREFIX}/sign`) {
       const session = await mediaGate(request, env);

@@ -23,8 +23,7 @@ import { mediaWorkerOrigin, mediaUploadUrl } from "../src/lib/github/upload.ts";
 import { isDroppedMedia } from "../src/lib/github/drop-files.ts";
 import worker from "../workers/media/src/index.js";
 import { checkLogin, loginPage, respondToMediaGet, safeNext } from "../workers/media/src/gate.js";
-import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter } from "../workers/media/src/journal.js";
-import { posterStage } from "../workers/media/src/motion.js";
+import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter, streamLoginPosters } from "../workers/media/src/journal.js";
 import { uploadGalleryFiles } from "../src/lib/github/gallery-client.ts";
 import { UPLOAD_POOL_SIZE } from "../src/lib/github/upload-pool.ts";
 import { mediaDuplicate, sha256Hex, skippedNote } from "../src/lib/github/duplicates.ts";
@@ -512,13 +511,55 @@ assert.deepEqual(exampleCard.posters, []);
 assert.match(exampleCard.when, /Aug 12, 2024/);
 assert.equal(JSON.stringify(cards).includes("/travel-log/media/"), false);
 assert.equal(JSON.stringify(cards).includes("private day text"), false);
-const loginHtml = await (await loginPage("", "Wrong username or password.", posterStage(cards))).text();
+const loginHtml = await (await loginPage("", "Wrong username or password.")).text();
 assert.match(loginHtml, /Gabe and Julia's Travel Log/);
-assert.match(loginHtml, /\/travel-log\/posters\/olympic-peninsula\/img-5123-2\.jpg/);
-assert.match(loginHtml, /Sep 5, 2026/);
+assert.match(loginHtml, /id="login-toggle"[^>]*>Posters</);
+assert.match(loginHtml, /id="login-panel" hidden/);
+assert.match(loginHtml, /#login-panel\[hidden\] \{ display: none !important; \}/);
+assert.match(loginHtml, /Drawn size \(px\)/);
+assert.match(loginHtml, /name="size"/);
+assert.match(loginHtml, /Blur \(px\)/);
+assert.match(loginHtml, /name="blur"/);
+assert.match(loginHtml, /Opacity/);
+assert.match(loginHtml, /name="speed"/);
+assert.match(loginHtml, /Appear delay \(seconds\)/);
+assert.match(loginHtml, /travel-log-login/);
+assert.equal(loginHtml.includes("travel-log-motion"), false);
+assert.match(loginHtml, /width: 80px/);
+assert.match(loginHtml, /size: 80, blur: 0/);
+assert.match(loginHtml, /fetch\("\/travel-log\/login-posters"/);
+assert.match(loginHtml, /LOADERS = 3/);
+assert.match(loginHtml, /img\.decode\(\)/);
+assert.match(loginHtml, /Math\.random\(\) \* maxWait \* 1000/);
+assert.match(loginHtml, /window\.setTimeout\(/);
 assert.match(loginHtml, /Wrong username or password/);
+assert.equal(loginHtml.includes("img-5123-2.jpg"), false);
+assert.equal(loginHtml.includes("<img"), false);
 assert.equal(loginHtml.includes("/travel-log/media/"), false);
 assert.equal(loginHtml.includes("private day text"), false);
+assert.equal(homeHtml.includes("Login poster size"), false);
+files.set("posters/secret-draft/hidden.jpg", "");
+const posterFeed = await (await streamLoginPosters(bucket)).text();
+assert.match(posterFeed, /\/travel-log\/posters\/olympic-peninsula\/img-5123-2\.jpg/);
+assert.match(posterFeed, /Olympic Peninsula/);
+assert.match(posterFeed, /Sep 5, 2026/);
+assert.equal(posterFeed.includes("/travel-log/media/"), false);
+assert.equal(posterFeed.includes("private day text"), false);
+assert.equal(posterFeed.includes("Secret Draft"), false);
+assert.equal(posterFeed.includes("hidden.jpg"), false);
+let loginLists = 0;
+const loginBucket = {
+  async list() {
+    loginLists += 1;
+    return { objects: [], truncated: false };
+  },
+  async get() {
+    return null;
+  },
+};
+const loginResponse = await worker.fetch(new Request("https://gabriel-kane.com/travel-log/login"), { TRIPS: loginBucket });
+assert.equal(loginLists, 0);
+assert.match(await loginResponse.text(), /Gabe and Julia's Travel Log/);
 
 assert.equal(
   placedImageMarkdown("olympic-peninsula", "img-5123-2.jpg", "img-5123-2"),

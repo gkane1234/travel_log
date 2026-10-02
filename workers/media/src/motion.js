@@ -13,73 +13,10 @@ const DEFAULTS = {
   nameSpeed: 24,
   nameCards: 4,
   photoWidth: 280,
-  posterSize: 220,
-  posterOpacity: 0.42,
 };
 
 function field(name, label, min, max, step) {
   return `<label>${label}<input name="${name}" type="number" min="${min}" max="${max}" step="${step}" /></label>`;
-}
-
-export function posterStage(cards) {
-  const tiles = [];
-  for (const card of cards) {
-    const caption = [card.location, card.when].filter(Boolean).join(" · ");
-    const sources = card.posters?.length ? card.posters : [""];
-    for (const src of sources) {
-      const image = src ? `<img src="${escapeAttr(src)}" alt="" />` : "";
-      tiles.push(
-        `<figure class="poster">${image}<figcaption><strong>${escapeAttr(card.title || "")}</strong><span>${escapeAttr(caption)}</span></figcaption></figure>`,
-      );
-    }
-  }
-  if (!tiles.length) return "";
-  return `<div class="stage" id="poster-stage">${tiles.join("")}</div>
-<script>
-(() => {
-  const KEY = ${JSON.stringify(SETTINGS_KEY)};
-  const saved = read();
-  const stage = document.getElementById("poster-stage");
-  if (!stage) return;
-  const size = Number(saved.posterSize) || ${DEFAULTS.posterSize};
-  const opacity = Number(saved.posterOpacity);
-  for (const card of stage.querySelectorAll(".poster")) {
-    card.style.width = size + "px";
-    card.style.opacity = Number.isFinite(opacity) ? String(opacity) : "${DEFAULTS.posterOpacity}";
-    const x = Math.random() * Math.max(1, window.innerWidth - size);
-    const y = Math.random() * Math.max(1, window.innerHeight - 180);
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 12 + Math.random() * 18;
-    card.dataset.x = String(x);
-    card.dataset.y = String(y);
-    card.dataset.vx = String(Math.cos(angle) * speed);
-    card.dataset.vy = String(Math.sin(angle) * speed);
-  }
-  let last = performance.now();
-  function tick(now) {
-    const dt = Math.min(0.05, (now - last) / 1000);
-    last = now;
-    for (const card of stage.querySelectorAll(".poster")) {
-      let x = Number(card.dataset.x) + Number(card.dataset.vx) * dt;
-      let y = Number(card.dataset.y) + Number(card.dataset.vy) * dt;
-      const w = card.offsetWidth || size;
-      const h = card.offsetHeight || 180;
-      if (x < -w) x = window.innerWidth;
-      if (x > window.innerWidth) x = -w;
-      if (y < -h) y = window.innerHeight;
-      if (y > window.innerHeight) y = -h;
-      card.dataset.x = String(x);
-      card.dataset.y = String(y);
-      card.style.transform = "translate(" + x + "px," + y + "px)";
-    }
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-  function read() {
-    try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { return {}; }
-  }
-})();
-</script>`;
 }
 
 export function motionMarkup(model) {
@@ -101,11 +38,9 @@ export function motionMarkup(model) {
     ${field("photoWidth", "Photo width (px)", 80, 640, 10)}
     ${field("nameSpeed", "Name card speed", 4, 120, 1)}
     ${field("nameCards", "Name cards", 1, 12, 1)}
-    ${field("posterSize", "Login poster size (px)", 80, 480, 10)}
-    ${field("posterOpacity", "Login poster opacity", 0.05, 1, 0.05)}
   </form>
   <ol id="recent-photos"></ol>
-  <p class="debug-note">Poster size and opacity show on the login page after a refresh. These values stay in this browser.</p>
+  <p class="debug-note">These values stay in this browser.</p>
 </aside>`;
   const script = `<script type="application/json" id="motion-data">${payload}</script>
 <script>
@@ -436,11 +371,4 @@ export function motionMarkup(model) {
 })();
 </script>`;
   return { chrome, script };
-}
-
-function escapeAttr(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;");
 }

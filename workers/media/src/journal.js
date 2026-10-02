@@ -511,6 +511,29 @@ export function streamHomePhotos(bucket) {
   });
 }
 
+/** Public login cards. Indexes first, then poster JPEGs only. No full-size media. */
+export function streamLoginPosters(bucket) {
+  return ndjsonResponse(async (send) => {
+    const keys = (await listKeys(bucket, "trips/")).filter((key) => key.endsWith("/index.md"));
+    await Promise.all(
+      keys.map(async (key) => {
+        const raw = await readText(bucket, key);
+        if (!raw) return;
+        const { data } = parseFrontmatter(raw);
+        if (String(data.draft) === "true") return;
+        const slug = key.split("/")[1];
+        const posterKeys = (await listKeys(bucket, `posters/${slug}/`)).filter((item) => isPosterKey(item)).slice(0, 16);
+        const title = data.title || slug;
+        const location = data.location || "";
+        const when = formatRange(data.date || "", data.endDate || "");
+        for (const posterKey of posterKeys) {
+          send({ title, location, when, url: `${PREFIX}/${posterKey}` });
+        }
+      }),
+    );
+  });
+}
+
 export async function renderJournal(bucket, url) {
   if (!bucket) return null;
   const path = url.pathname.replace(/\/+$/, "") || "/";

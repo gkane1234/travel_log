@@ -115,28 +115,34 @@ function page(title, main, motion) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(title)}</title>
   <style>
-    :root { color: #1c241e; background: #f3efe6; font-family: Georgia, "Times New Roman", serif; }
-    body { margin: 0; }
-    a { color: #2e4a3e; }
+    :root { color: #f3efe6; background: #1c241e; font-family: Georgia, "Times New Roman", serif; }
+    body { margin: 0; background: #1c241e; }
+    header a, .header-actions button { color: #f3efe6; }
     #motion-names, #motion-layer { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
     .name-card { position: absolute; top: 0; left: 0; display: flex; gap: 0.55rem; align-items: center; width: max-content; max-width: 16rem; padding: 0.35rem 0.7rem 0.35rem 0.35rem; background: rgba(243, 239, 230, 0.72); border-radius: 999px; font-family: "Segoe UI", sans-serif; font-size: 0.92rem; }
     .name-card img { width: 3.2rem; height: 2.4rem; object-fit: cover; border-radius: 999px; margin: 0; }
     .name-card span { display: grid; line-height: 1.2; }
     .name-card em { font-style: normal; font-size: 0.75rem; opacity: 0.8; }
     .float-photo { position: absolute; height: auto; margin: 0; border-radius: 8px; box-shadow: 0 8px 24px rgba(28, 36, 30, 0.18); }
+    .photo-card { position: absolute; top: 0; left: 0; margin: 0; background: rgba(28, 36, 30, 0.72); color: #f3efe6; border-radius: 6px; overflow: hidden; }
+    .photo-card img { display: block; width: 100%; margin: 0; object-fit: cover; }
+    .photo-card figcaption { padding: 0.25rem 0.35rem 0.35rem; font-family: "Segoe UI", sans-serif; font-size: 0.68rem; }
+    .photo-card strong, .photo-card span { display: block; }
     #motion-toggle { position: fixed; right: 0.8rem; bottom: 0.8rem; z-index: 6; font-family: "Segoe UI", sans-serif; font-size: 0.9rem; padding: 0.45rem 0.75rem; border: 0; border-radius: 999px; background: #2e4a3e; color: #f3efe6; cursor: pointer; }
     #motion-debug { position: fixed; right: 0.8rem; bottom: 3.4rem; z-index: 6; width: min(18rem, calc(100% - 1.6rem)); padding: 0.7rem 0.8rem; background: rgba(28, 36, 30, 0.92); color: #f3efe6; font-family: "Segoe UI", sans-serif; font-size: 0.82rem; border-radius: 8px; }
     #motion-debug[hidden] { display: none !important; }
     #motion-form { display: grid; gap: 0.35rem; }
     #motion-form label { display: grid; gap: 0.1rem; }
-    #motion-form input { font: inherit; width: 100%; }
+    #motion-form input, #motion-form select { font: inherit; width: 100%; }
     #motion-debug .debug-note { margin: 0.45rem 0 0; opacity: 0.8; }
     #recent-photos { list-style: disc; margin: 0.45rem 0 0; padding-left: 1.1rem; max-height: 7.5rem; overflow: auto; }
     #recent-photos:empty { display: none; }
     #recent-photos li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     header, main { position: relative; z-index: 1; max-width: 42rem; margin: 0 auto; padding: 1.25rem; }
-    main { background: rgba(243, 239, 230, 0.88); }
-    main:has(#log-panel) { background: transparent; }
+    main { background: #f3efe6; color: #1c241e; }
+    main a { color: #2e4a3e; }
+    main:has(#log-panel) { background: transparent; color: #f3efe6; }
+    #log-panel { color: #1c241e; }
     .log-menu { position: relative; display: inline-block; }
     #log-toggle { font-family: "Segoe UI", sans-serif; font-size: 1rem; padding: 0.45rem 0.8rem; border: 1px solid #2e4a3e; border-radius: 999px; background: rgba(243, 239, 230, 0.92); color: #1c241e; cursor: pointer; }
     #log-panel { position: absolute; top: calc(100% + 0.45rem); left: 0; width: min(36rem, calc(100vw - 2.5rem)); max-height: min(70vh, 34rem); overflow: auto; padding: 0.4rem 1rem 1rem; background: rgba(243, 239, 230, 0.94); border-radius: 10px; box-shadow: 0 10px 28px rgba(28, 36, 30, 0.16); }
@@ -484,6 +490,7 @@ export function streamHomeTrips(bucket) {
 export function streamHomePhotos(bucket) {
   return ndjsonResponse(async (send) => {
     const publicSlugs = new Set();
+    const tripInfo = new Map();
     const indexes = (await listKeys(bucket, "trips/")).filter((key) => key.endsWith("/index.md"));
     await Promise.all(
       indexes.map(async (key) => {
@@ -491,7 +498,13 @@ export function streamHomePhotos(bucket) {
         if (!raw) return;
         const { data } = parseFrontmatter(raw);
         if (String(data.draft) === "true") return;
-        publicSlugs.add(key.split("/")[1]);
+        const slug = key.split("/")[1];
+        publicSlugs.add(slug);
+        tripInfo.set(slug, {
+          title: data.title || slug,
+          location: data.location || "",
+          when: formatRange(data.date || "", data.endDate || ""),
+        });
       }),
     );
     let sent = 0;
@@ -504,7 +517,8 @@ export function streamHomePhotos(bucket) {
         if (!publicSlugs.has(slug) || !key.includes("/photos/") || !isImageFile(key)) continue;
         if (sent >= MOTION_PHOTO_CAP) return;
         sent += 1;
-        send({ url: `${PREFIX}/${key}` });
+        const info = tripInfo.get(slug) || { title: "", location: "", when: "" };
+        send({ url: `${PREFIX}/${key}`, title: info.title, location: info.location, when: info.when });
       }
       cursor = listed.truncated && sent < MOTION_PHOTO_CAP ? listed.cursor : undefined;
     } while (cursor);

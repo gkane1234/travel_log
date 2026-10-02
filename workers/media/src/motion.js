@@ -13,10 +13,16 @@ const DEFAULTS = {
   nameSpeed: 24,
   nameCards: 4,
   photoWidth: 280,
+  look: "current",
 };
 
 function field(name, label, min, max, step) {
   return `<label>${label}<input name="${name}" type="number" min="${min}" max="${max}" step="${step}" /></label>`;
+}
+
+function choice(name, label, options) {
+  const items = options.map(([value, text]) => `<option value="${value}">${text}</option>`).join("");
+  return `<label>${label}<select name="${name}">${items}</select></label>`;
 }
 
 export function motionMarkup(model) {
@@ -26,6 +32,7 @@ export function motionMarkup(model) {
 <button type="button" id="motion-toggle" aria-expanded="false" aria-controls="motion-debug">Motion</button>
 <aside id="motion-debug" hidden>
   <form id="motion-form">
+    ${choice("look", "Photo style", [["current", "Current"], ["cards", "Cards"]])}
     ${field("peakOpacity", "Peak opacity", 0.05, 1, 0.05)}
     ${field("travelPercent", "Travel distance (% of screen)", 1, 80, 1)}
     ${field("fadeIn", "Fade in (seconds)", 0.1, 12, 0.1)}
@@ -60,14 +67,23 @@ export function motionMarkup(model) {
   const panel = document.getElementById("motion-debug");
   const toggle = document.getElementById("motion-toggle");
   const settings = Object.assign({}, defaults, read());
+  if (settings.look !== "cards") settings.look = "current";
   let spawnAt = 0;
   let cards = [];
   let floats = [];
+  const driftCards = [];
+  const photoMeta = {};
 
   for (const input of form.elements) {
     if (!input.name || !(input.name in settings)) continue;
     input.value = String(settings[input.name]);
     input.addEventListener("input", () => {
+      if (input.name === "look") {
+        settings.look = input.value === "cards" ? "cards" : "current";
+        localStorage.setItem(KEY, JSON.stringify(settings));
+        applyStyle();
+        return;
+      }
       const value = Number(input.value);
       if (!Number.isFinite(value)) return;
       settings[input.name] = value;
@@ -87,7 +103,23 @@ export function motionMarkup(model) {
   function read() {
     try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { return {}; }
   }
+  function cardMode() {
+    return settings.look === "cards";
+  }
+  function applyStyle() {
+    if (cardMode()) {
+      floats.forEach((photo) => photo.el.remove());
+      floats = [];
+      while (cards.length) cards.pop().el.remove();
+    } else {
+      driftCards.forEach((card) => card.remove());
+      driftCards.length = 0;
+      syncCards();
+    }
+    spawnAt = 0;
+  }
   function syncCards() {
+    if (cardMode()) return;
     const count = Math.max(1, Math.round(settings.nameCards));
     while (cards.length < count && trips.length) {
       const trip = trips[cards.length % trips.length];
@@ -206,7 +238,65 @@ export function motionMarkup(model) {
     paintRecent();
     return pickPhotoUrl();
   }
+  function queueDrift() {
+    const maxPhotos = Math.max(1, Math.round(settings.maxPhotos));
+    if (!photos.length || driftCards.length + floatPending >= maxPhotos) return;
+    const url = pickPhotoUrl();
+    if (!url || url.indexOf("/travel-log/posters/") !== -1) return;
+    const fileName = photoName(url);
+    const meta = photoMeta[url] || {};
+    remember(fileName);
+    floatPending += 1;
+    const img = document.createElement("img");
+    img.alt = "";
+    img.decoding = "async";
+    loadQueue.unshift({
+      img,
+      url,
+      show() {
+        const maxWait = Math.max(0, Number(settings.appearDelay) || 0);
+        const wait = Math.random() * maxWait * 1000;
+        window.setTimeout(() => {
+          floatPending -= 1;
+          if (!cardMode()) return;
+          if (driftCards.length >= Math.max(1, Math.round(settings.maxPhotos))) return;
+          const card = document.createElement("figure");
+          card.className = "photo-card";
+          const caption = document.createElement("figcaption");
+          const title = document.createElement("strong");
+          title.textContent = meta.title || "";
+          const when = document.createElement("span");
+          const bits = [];
+          if (meta.location) bits.push(meta.location);
+          if (meta.when) bits.push(meta.when);
+          when.textContent = bits.join(" · ");
+          caption.append(title, when);
+          card.append(img, caption);
+          const size = Math.max(40, Number(settings.photoWidth) || 80);
+          const angle = Math.random() * Math.PI * 2;
+          card.style.width = size + "px";
+          card.style.opacity = String(Math.min(1, Math.max(0, Number(settings.peakOpacity) || 0)));
+          img.style.height = Math.round(size * 0.66) + "px";
+          card.dataset.angle = String(angle);
+          card.dataset.x = String(Math.random() * Math.max(1, window.innerWidth - size));
+          card.dataset.y = String(Math.random() * Math.max(1, window.innerHeight - size));
+          layer.append(card);
+          driftCards.push(card);
+        }, wait);
+      },
+      failed() {
+        floatPending -= 1;
+        remember(fileName);
+        queueFloat();
+      },
+    });
+    pumpLoads();
+  }
   function queueFloat() {
+    if (cardMode()) {
+      queueDrift();
+      return;
+    }
     const maxPhotos = Math.max(1, Math.round(settings.maxPhotos));
     if (!photos.length || floats.length + floatPending >= maxPhotos) return;
     const url = pickPhotoUrl();
@@ -230,6 +320,7 @@ export function motionMarkup(model) {
         const wait = Math.random() * maxWait * 1000;
         window.setTimeout(() => {
           floatPending -= 1;
+          if (cardMode()) return;
           if (floats.length >= Math.max(1, Math.round(settings.maxPhotos))) return;
           layer.append(img);
           floats.push({ el: img, born: performance.now(), angle });
@@ -251,6 +342,31 @@ export function motionMarkup(model) {
   function tick(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    if (cardMode()) {
+      const speed = Math.max(0, Number(settings.nameSpeed) || 0);
+      const size = Math.max(40, Number(settings.photoWidth) || 80);
+      const opacity = Math.min(1, Math.max(0, Number(settings.peakOpacity) || 0));
+      for (const card of driftCards) {
+        let x = Number(card.dataset.x) + Math.cos(Number(card.dataset.angle)) * speed * dt;
+        let y = Number(card.dataset.y) + Math.sin(Number(card.dataset.angle)) * speed * dt;
+        const w = card.offsetWidth || size;
+        const h = card.offsetHeight || size;
+        if (x < -w) x = window.innerWidth;
+        if (x > window.innerWidth) x = -w;
+        if (y < -h) y = window.innerHeight;
+        if (y > window.innerHeight) y = -h;
+        card.dataset.x = String(x);
+        card.dataset.y = String(y);
+        card.style.width = size + "px";
+        card.style.opacity = String(opacity);
+        card.style.transform = "translate(" + x + "px," + y + "px)";
+        const img = card.querySelector("img");
+        if (img) img.style.height = Math.round(size * 0.66) + "px";
+      }
+      if (now >= spawnAt) spawn(now);
+      requestAnimationFrame(tick);
+      return;
+    }
     const speed = Math.max(1, settings.nameSpeed);
     for (const card of cards) {
       card.x += Math.cos(card.angle) * speed * dt;
@@ -329,12 +445,14 @@ export function motionMarkup(model) {
     }
     if (!placed) list.append(li);
     trips.push({ title: trip.title || "", when: trip.when || "", thumb: trip.thumb || "" });
-    syncCards();
+    if (!cardMode()) syncCards();
   }
   function addListedPhoto(item) {
     const url = item && item.url ? item.url : "";
-    if (!url || photos.indexOf(url) !== -1 || photos.length >= 240) return;
+    if (!url || url.indexOf("/travel-log/media/") !== 0 || url.indexOf("/posters/") !== -1) return;
+    if (photos.indexOf(url) !== -1 || photos.length >= 240) return;
     photos.push(url);
+    photoMeta[url] = { title: item.title || "", location: item.location || "", when: item.when || "" };
   }
   async function readNdjson(response, onItem) {
     if (!response || !response.ok || !response.body) return;
@@ -366,7 +484,7 @@ export function motionMarkup(model) {
   }
   void loadHome();
   if (!document.querySelector(".trip-list")) return;
-  syncCards();
+  if (!cardMode()) syncCards();
   requestAnimationFrame(tick);
 })();
 </script>`;

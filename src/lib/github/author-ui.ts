@@ -21,6 +21,7 @@ import { filesFromTransfer } from "./drop-files.ts";
 import { listTripGalleryKeys, listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 import { beginUploadList } from "./upload-progress.ts";
 import { createGate, createUploadQueue } from "./upload-pool.ts";
+import JSZip from "jszip";
 
 type PreparedRoute = { repoPath: string; bytes: Uint8Array };
 
@@ -110,6 +111,24 @@ export function mountAuthor(root: HTMLElement): void {
   const createDrop = must<HTMLElement>(root, "create-drop");
   const mediaPool = must<HTMLElement>(root, "media-pool");
   const poolHint = must<HTMLElement>(root, "pool-hint");
+  const poolActions = must<HTMLElement>(root, "pool-actions");
+  const poolRemove = must<HTMLButtonElement>(root, "pool-remove");
+  const poolDownload = must<HTMLButtonElement>(root, "pool-download");
+  const poolMarquee = document.createElement("div");
+  poolMarquee.id = "pool-marquee";
+  poolMarquee.hidden = true;
+  root.append(poolMarquee);
+  const selectedPaths = new Set<string>();
+  type PoolGesture = {
+    id: number;
+    x: number;
+    y: number;
+    path: string;
+    mode: "pending" | "marquee" | "insert";
+    background: boolean;
+  };
+  let poolGesture: PoolGesture | null = null;
+  let ignorePoolClick = false;
   const uploadList = must<HTMLOListElement>(root, "upload-progress");
   const uploadTemplate = must<HTMLTemplateElement>(root, "upload-file-template");
   const thumbTip = document.createElement("span");
@@ -394,14 +413,27 @@ export function mountAuthor(root: HTMLElement): void {
     };
   }
 
+  function paintSelection(): void {
+    for (const button of mediaPool.querySelectorAll<HTMLButtonElement>(".pool-thumb")) {
+      const on = selectedPaths.has(button.dataset.path || "");
+      button.classList.toggle("is-selected", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    poolActions.hidden = selectedPaths.size === 0;
+  }
+
   function renderPool(): void {
-    poolHint.textContent = "Drag a thumbnail onto the day note. Double-click to see it full size.";
+    poolHint.textContent = "Click a thumbnail to select it. Drag across the grid to select several. Drag a thumbnail onto the note to place it. Double-click to see it full size.";
+    for (const path of [...selectedPaths]) {
+      if (!poolItems.some((item) => item.path === path)) selectedPaths.delete(path);
+    }
     mediaPool.replaceChildren();
     if (!trip || !poolItems.length) {
       const empty = document.createElement("p");
       empty.className = "meta";
       empty.textContent = "No photos or videos yet.";
       mediaPool.append(empty);
+      paintSelection();
       return;
     }
     for (const item of poolItems) {
@@ -410,6 +442,8 @@ export function mountAuthor(root: HTMLElement): void {
       button.className = "pool-thumb";
       button.draggable = true;
       button.dataset.path = item.path;
+      button.setAttribute("aria-pressed", selectedPaths.has(item.path) ? "true" : "false");
+      if (selectedPaths.has(item.path)) button.classList.add("is-selected");
       const src = gatedMediaUrl(trip.slug, item.filename);
       if (item.kind === "video") {
         const video = document.createElement("video");
@@ -460,14 +494,238 @@ export function mountAuthor(root: HTMLElement): void {
         event.preventDefault();
         openPhotoPreview(item);
       });
+      button.addEventListener("click", () => {
+        if (ignorePoolClick) return;
+        if (selectedPaths.has(item.path)) selectedPaths.delete(item.path);
+        else selectedPaths.add(item.path);
+        paintSelection();
+      });
       button.addEventListener("dragstart", (event) => {
+        if (!poolGesture || poolGesture.mode !== "insert") {
+          event.preventDefault();
+          return;
+        }
         event.dataTransfer?.setData("application/x-travel-log", item.markdown);
         event.dataTransfer?.setData("text/plain", item.markdown);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
       });
       mediaPool.append(button);
     }
+    paintSelection();
   }
+
+  function pointIn(element: HTMLElement, x: number, y: number): boolean {
+    const rect = element.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  }
+
+  function hidePoolMarquee(): void {
+    poolMarquee.hidden = true;
+  }
+
+  function selectInMarquee(x1: number, y1: number, x2: number, y2: number): void {
+    const left = Math.min(x1, x2);
+    const right = Math.max(x1, x2);
+    const top = Math.min(y1, y2);
+    const bottom = Math.max(y1, y2);
+    poolMarquee.hidden = false;
+    poolMarquee.style.left = `${left}px`;
+    poolMarquee.style.top = `${top}px`;
+    poolMarquee.style.width = `${Math.max(0, right - left)}px`;
+    poolMarquee.style.height = `${Math.max(0, bottom - top)}px`;
+    selectedPaths.clear();
+    for (const button of mediaPool.querySelectorAll<HTMLElement>(".pool-thumb")) {
+      const rect = button.getBoundingClientRect();
+      const hit = rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top;
+      if (hit && button.dataset.path) selectedPaths.add(button.dataset.path);
+    }
+    paintSelection();
+  }
+
+  function lineEmbedsFile(line: string, filename: string): boolean {
+    const trimmed = line.trim();
+    if (!trimmed.includes(filename)) return false;
+    if (trimmed.startsWith("![") && trimmed.includes("](")) return true;
+    return /^<TripVideo\s+src="[^"]*"\s*\/?>$/.test(trimmed);
+  }
+
+  function stripMediaFromOpenNote(filename: string): boolean {
+    const next = bodyEl.value.split("\n").filter((line) => !lineEmbedsFile(line, filename));
+    if (next.join("\n") === bodyEl.value) return false;
+    bodyEl.value = next.join("\n");
+    dirty = true;
+    return true;
+  }
+
+  function saveBlob(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.hidden = true;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  async function downloadSelected(): Promise<void> {
+    if (!trip) return;
+    const items = poolItems.filter((item) => selectedPaths.has(item.path));
+    if (!items.length) return;
+    setStatus(items.length === 1 ? `Downloading ${items[0].filename}…` : `Preparing ${trip.slug}.zip…`);
+    try {
+      const files: { filename: string; blob: Blob }[] = [];
+      for (const item of items) {
+        const response = await fetch(gatedMediaUrl(trip.slug, item.filename), { credentials: "include" });
+        if (!response.ok) throw new Error(`Could not download ${item.filename}.`);
+        files.push({ filename: item.filename, blob: await response.blob() });
+      }
+      if (files.length === 1) {
+        saveBlob(files[0].blob, files[0].filename);
+        setStatus(`Downloaded ${files[0].filename}.`);
+        return;
+      }
+      const zip = new JSZip();
+      for (const file of files) zip.file(file.filename, file.blob);
+      saveBlob(await zip.generateAsync({ type: "blob" }), `${trip.slug}.zip`);
+      setStatus(`Downloaded ${trip.slug}.zip.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not download those files.", true);
+    }
+  }
+
+  async function removeSelected(): Promise<void> {
+    if (!trip) return;
+    const items = poolItems.filter((item) => selectedPaths.has(item.path));
+    if (!items.length) return;
+    const names = items.map((item) => item.filename);
+    setStatus(`Removing ${names.join(", ")}…`);
+    const removed: PoolItem[] = [];
+    const failed: string[] = [];
+    for (const item of items) {
+      try {
+        const response = await fetch(`/travel-log/media/${trip.slug}/photos/${encodeURIComponent(item.filename)}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!response.ok) failed.push(item.filename);
+        else removed.push(item);
+      } catch {
+        failed.push(item.filename);
+      }
+    }
+    const removedPaths = new Set(removed.map((item) => item.path));
+    let stripped = false;
+    let clearedCover = false;
+    for (const item of removed) {
+      if (stripMediaFromOpenNote(item.filename)) stripped = true;
+      selectedPaths.delete(item.path);
+      if (selectedCover.endsWith(`/${item.filename}`)) {
+        selectedCover = "";
+        clearedCover = true;
+      }
+    }
+    poolItems = poolItems.filter((item) => !removedPaths.has(item.path));
+    closePhotoPreview();
+    renderPool();
+    fillCoverGrid(poolItems.filter((item) => item.kind === "photo").map((item) => item.path));
+    const removedNames = removed.map((item) => item.filename);
+    if (!removedNames.length) {
+      setStatus(`Could not remove ${failed.join(", ")}.`, true);
+      return;
+    }
+    const notes = [`Removed ${removedNames.join(", ")}.`];
+    if (stripped) notes.push("Save day to drop it from this note.");
+    if (clearedCover) notes.push("The thumbnail choice was cleared; save the thumbnail to keep that.");
+    if (failed.length) notes.push(`Could not remove ${failed.join(", ")}.`);
+    setStatus(notes.join(" "), Boolean(failed.length));
+  }
+
+  mediaPool.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const thumb = target?.closest<HTMLElement>(".pool-thumb") || null;
+    poolGesture = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      path: thumb?.dataset.path || "",
+      mode: "pending",
+      background: !thumb,
+    };
+    if (!thumb) event.preventDefault();
+    try {
+      mediaPool.setPointerCapture(event.pointerId);
+    } catch {
+      /* The gesture still tracks while the pointer stays in the grid. */
+    }
+  });
+
+  mediaPool.addEventListener("pointermove", (event) => {
+    const gesture = poolGesture;
+    if (!gesture || event.pointerId !== gesture.id) return;
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    if (gesture.mode === "pending" && dx * dx + dy * dy < 36) return;
+    if (gesture.background || gesture.mode === "marquee") {
+      gesture.mode = "marquee";
+      selectInMarquee(gesture.x, gesture.y, event.clientX, event.clientY);
+      return;
+    }
+    const inside = pointIn(mediaPool, event.clientX, event.clientY);
+    if (!inside) {
+      gesture.mode = "insert";
+      hidePoolMarquee();
+      dropzone.classList.toggle("dragover", pointIn(dropzone, event.clientX, event.clientY));
+      return;
+    }
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const over = hit instanceof Element ? hit.closest<HTMLElement>(".pool-thumb") : null;
+    const overPath = over?.dataset.path || "";
+    if (!overPath || overPath !== gesture.path) {
+      gesture.mode = "marquee";
+      selectInMarquee(gesture.x, gesture.y, event.clientX, event.clientY);
+    }
+  });
+
+  function finishPoolGesture(event: PointerEvent): void {
+    const gesture = poolGesture;
+    if (!gesture || event.pointerId !== gesture.id) return;
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    const moved = dx * dx + dy * dy >= 36;
+    dropzone.classList.remove("dragover");
+    hidePoolMarquee();
+    poolGesture = null;
+    if (gesture.mode === "insert" && gesture.path && pointIn(dropzone, event.clientX, event.clientY)) {
+      const item = poolItems.find((entry) => entry.path === gesture.path);
+      if (item) placeMarkdown(item.markdown, dropCaret(event.clientX, event.clientY));
+    } else if (gesture.mode === "pending" && !gesture.path && !moved) {
+      selectedPaths.clear();
+      paintSelection();
+    }
+    if (gesture.mode === "marquee" || gesture.mode === "insert" || moved) {
+      ignorePoolClick = true;
+      window.setTimeout(() => {
+        ignorePoolClick = false;
+      }, 0);
+    }
+    try {
+      mediaPool.releasePointerCapture(event.pointerId);
+    } catch {
+      /* Capture may already be gone. */
+    }
+  }
+
+  mediaPool.addEventListener("pointerup", finishPoolGesture);
+  mediaPool.addEventListener("pointercancel", finishPoolGesture);
+  poolRemove.addEventListener("click", () => {
+    void removeSelected();
+  });
+  poolDownload.addEventListener("click", () => {
+    void downloadSelected();
+  });
 
   async function refreshLibrary(): Promise<void> {
     if (!trip) return;

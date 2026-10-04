@@ -214,7 +214,11 @@ const { slug = "" } = Astro.props;
         <div class="drop-hint">Drag a photo or video from View uploaded media onto this note. A click does not add it. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
       </div>
       <aside id="added-photos" hidden>
-        <p id="pool-hint" class="meta">Drag a thumbnail onto the day note. Double-click to see it full size.</p>
+        <p id="pool-hint" class="meta">Click a thumbnail to select it. Drag across the grid to select several. Drag a thumbnail onto the note to place it.</p>
+        <p id="pool-actions" hidden>
+          <button type="button" id="pool-remove">Remove</button>
+          <button type="button" id="pool-download">Download</button>
+        </p>
         <div id="media-pool" class="cover-grid"></div>
         <button type="button" id="added-photos-close" class="linkish">Close</button>
       </aside>
@@ -474,10 +478,26 @@ const { slug = "" } = Astro.props;
     line-height: 1.3;
     word-break: break-word;
   }
+  #pool-actions {
+    display: flex;
+    gap: 0.45rem;
+    margin: 0;
+  }
+  #pool-actions[hidden] {
+    display: none !important;
+  }
+  #pool-marquee {
+    position: fixed;
+    z-index: 20;
+    border: 1px solid #2e4a3e;
+    background: rgba(46, 74, 62, 0.18);
+    pointer-events: none;
+  }
   #media-pool {
     display: grid;
     grid-template-columns: repeat(auto-fill, 7.5rem);
     gap: 0.45rem;
+    position: relative;
   }
   button.pool-thumb {
     display: block;
@@ -488,6 +508,10 @@ const { slug = "" } = Astro.props;
     overflow: hidden;
     border: 1px solid var(--line);
     background: #e4ddd0;
+  }
+  button.pool-thumb.is-selected {
+    outline: 3px solid #2e4a3e;
+    outline-offset: -3px;
   }
   button.pool-thumb img,
   button.pool-thumb video {

@@ -182,6 +182,9 @@ const uploadEnv = {
       const bytes = body instanceof ArrayBuffer ? new Uint8Array(body) : new Uint8Array(await new Response(body).arrayBuffer());
       storedUploads.set(key, { bytes, type: options?.httpMetadata?.contentType || "" });
     },
+    async delete(key) {
+      storedUploads.delete(key);
+    },
   },
 };
 const uploadCookie = login.cookie.split(";")[0];
@@ -207,6 +210,32 @@ const deniedPut = await worker.fetch(
   uploadEnv,
 );
 assert.equal(deniedPut.status, 401);
+storedUploads.set("posters/olympic-peninsula/shore.jpg", { bytes: new Uint8Array([9]), type: "image/jpeg" });
+const deniedDelete = await worker.fetch(
+  new Request("https://gabriel-kane.com/travel-log/media/olympic-peninsula/photos/shore.jpg", { method: "DELETE" }),
+  uploadEnv,
+);
+assert.equal(deniedDelete.status, 401);
+assert.equal(storedUploads.has("media/olympic-peninsula/photos/shore.jpg"), true);
+assert.equal(storedUploads.has("posters/olympic-peninsula/shore.jpg"), true);
+const deniedRouteDelete = await worker.fetch(
+  new Request("https://gabriel-kane.com/travel-log/media/olympic-peninsula/routes/track.gpx", {
+    method: "DELETE",
+    headers: { Cookie: uploadCookie },
+  }),
+  uploadEnv,
+);
+assert.equal(deniedRouteDelete.status, 404);
+const deletedPhoto = await worker.fetch(
+  new Request("https://gabriel-kane.com/travel-log/media/olympic-peninsula/photos/shore.jpg", {
+    method: "DELETE",
+    headers: { Cookie: uploadCookie },
+  }),
+  uploadEnv,
+);
+assert.equal(deletedPhoto.status, 200);
+assert.equal(storedUploads.has("media/olympic-peninsula/photos/shore.jpg"), false);
+assert.equal(storedUploads.has("posters/olympic-peninsula/shore.jpg"), false);
 const allowed = await respondToMediaGet(
   new Request("https://trips.example/media/olympic-peninsula/shore.jpg", {
     headers: { Cookie: login.cookie.split(";")[0] },
@@ -361,6 +390,8 @@ assert.match(homeHtml, /Appear delay \(seconds\)/);
 assert.match(homeHtml, /appearDelay/);
 assert.match(homeHtml, /Recent photos/);
 assert.match(homeHtml, /name="recentLimit"/);
+assert.match(homeHtml, /name="nameCards" type="number" min="0"/);
+assert.match(homeHtml, /Math\.max\(0, Math\.round\(settings\.nameCards\)\)/);
 assert.match(homeHtml, /id="recent-photos"/);
 assert.match(homeHtml, /function pickPhotoUrl/);
 assert.match(homeHtml, /if \(!blocked\[photoName\(url\)\]\) choices\.push\(url\)/);
@@ -663,6 +694,11 @@ assert.match(dropSource, /webkitGetAsEntry/);
 assert.match(dropSource, /transfer\.items/);
 assert.equal(dropSource.includes("file://"), false);
 assert.match(authorUi, /className = "pool-thumb"/);
+assert.match(authorUi, /method: "DELETE"/);
+assert.match(authorUi, /new JSZip\(\)/);
+assert.match(authorUi, /stripMediaFromOpenNote/);
+assert.match(authorMarkup, /id="pool-remove"/);
+assert.match(authorMarkup, /id="pool-download"/);
 assert.match(authorUi, /beginUploadList/);
 assert.match(authorUi, /createUploadQueue/);
 assert.match(authorUi, /acceptMore/);

@@ -178,6 +178,14 @@ function loginRedirect(url) {
   return redirect(`${PUBLIC_PREFIX}/login?next=${encodeURIComponent(next)}`);
 }
 
+function posterKeyForMedia(key) {
+  const match = /^media\/([a-z0-9]+(?:-[a-z0-9]+)*)\/photos\/([a-z0-9][a-z0-9._-]{0,160})$/.exec(key);
+  if (!match) return "";
+  const base = match[2].replace(/\.[^.]+$/i, "");
+  const poster = `posters/${match[1]}/${base}.jpg`;
+  return isPosterKey(poster) ? poster : "";
+}
+
 function pagesTarget(env, pathname, search) {
   const repo = String(env.GITHUB_REPOSITORY || "gkane1234/travel_log");
   const [owner, name] = repo.split("/");
@@ -246,6 +254,22 @@ export default {
     }
 
     const underLog = path === PUBLIC_PREFIX || path.startsWith(`${PUBLIC_PREFIX}/`);
+    if (underLog && request.method === "DELETE" && path.startsWith(`${PUBLIC_PREFIX}/media/`)) {
+      const auth = await canEditNotes(request, env);
+      if (!auth.ok) return json({ error: auth.error }, auth.status || 401);
+      let key = "";
+      try {
+        key = decodeURIComponent(path.slice(`${PUBLIC_PREFIX}/`.length));
+      } catch {
+        return json({ error: "Not found" }, 404);
+      }
+      if (!isAllowedKey(key) || !key.includes("/photos/")) return json({ error: "Not found" }, 404);
+      if (!env.TRIPS) return json({ error: "Trip storage is not configured." }, 503);
+      await env.TRIPS.delete(key);
+      const poster = posterKeyForMedia(key);
+      if (poster) await env.TRIPS.delete(poster);
+      return json({ ok: true });
+    }
     if (underLog && request.method === "GET" && path.startsWith(`${PUBLIC_PREFIX}/posters/`)) {
       const key = decodeURIComponent(path.slice(`${PUBLIC_PREFIX}/`.length));
       return servePoster(env, key);

@@ -46,7 +46,7 @@ export function motionMarkup(model) {
     ${field("photoWidth", "Photo width (px)", 80, 640, 10)}
     ${field("cardSize", "Card size (px)", 40, 320, 4)}
     ${field("nameSpeed", "Name card speed", 4, 120, 1)}
-    ${field("nameCards", "Name cards", 1, 12, 1)}
+    ${field("nameCards", "Name cards", 0, 12, 1)}
   </form>
   <ol id="recent-photos"></ol>
   <p class="debug-note">These values stay in this browser.</p>
@@ -122,7 +122,7 @@ export function motionMarkup(model) {
   }
   function syncCards() {
     if (cardMode()) return;
-    const count = Math.max(1, Math.round(settings.nameCards));
+    const count = Math.max(0, Math.round(settings.nameCards));
     while (cards.length < count && trips.length) {
       const trip = trips[cards.length % trips.length];
       const card = document.createElement("div");

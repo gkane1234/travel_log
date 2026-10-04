@@ -170,9 +170,9 @@ function page(title, main, motion) {
     button.note-media { display: block; width: 100%; margin: 1rem 0; padding: 0; border: 0; background: transparent; text-align: left; }
     button.note-media img, button.note-media video { margin: 0; width: 100%; pointer-events: none; }
     a.edit-trip { font-family: "Segoe UI", sans-serif; font-size: 0.9rem; text-decoration: none; border: 1px solid #2e4a3e; color: #2e4a3e; background: transparent; padding: 0.3rem 0.65rem; cursor: pointer; }
-    #lightbox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; background: rgba(28, 36, 30, 0.9); }
+    #lightbox { position: fixed; inset: 0; z-index: 6; display: grid; place-items: center; box-sizing: border-box; padding: 3.25rem 1rem 1rem; background: rgba(28, 36, 30, 0.9); }
     #lightbox[hidden] { display: none; }
-    #lightbox img, #lightbox video { max-width: min(92vw, 64rem); max-height: 86vh; margin: 0; }
+    #lightbox img, #lightbox video { display: block; width: auto; height: auto; max-width: calc(100vw - 2rem); max-height: calc(100vh - 4.5rem); object-fit: contain; margin: 0; }
     #lightbox-close { position: absolute; top: 0.8rem; right: 0.8rem; font: inherit; padding: 0.35rem 0.7rem; background: #f3efe6; color: #1c241e; border: 0; cursor: pointer; }
   </style>
 </head>

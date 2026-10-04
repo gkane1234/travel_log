@@ -209,9 +209,9 @@ const { slug = "" } = Astro.props;
         <textarea
           id="day-body"
           rows="18"
-          placeholder="Write this day's notes. Drag a thumbnail from View uploaded media onto this text."
+          placeholder="Write this day's notes. Drag a thumbnail here, or drop photos and videos from your computer."
         ></textarea>
-        <div class="drop-hint">Drag a photo or video from View uploaded media onto this note. A click does not add it. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
+        <div class="drop-hint">Drag a thumbnail onto this note, or drop photos and videos from your computer. A click does not add it. Save day to keep a dropped file in the note. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
       </div>
       <div id="pool-resize" hidden role="separator" aria-orientation="vertical" aria-label="Resize uploaded media"></div>
       <aside id="added-photos" hidden>
@@ -635,15 +635,21 @@ const { slug = "" } = Astro.props;
     z-index: 6;
     display: grid;
     place-items: center;
+    box-sizing: border-box;
+    padding: 3.25rem 1rem 1rem;
     background: rgba(28, 36, 30, 0.9);
   }
   #photo-preview[hidden] {
     display: none;
   }
-  #photo-preview img,
-  #photo-preview video {
-    max-width: min(92vw, 64rem);
-    max-height: 86vh;
+  #photo-preview :global(img),
+  #photo-preview :global(video) {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: calc(100vw - 2rem);
+    max-height: calc(100vh - 4.5rem);
+    object-fit: contain;
     margin: 0;
   }
   #photo-preview-close {

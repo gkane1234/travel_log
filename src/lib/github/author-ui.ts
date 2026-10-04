@@ -17,7 +17,7 @@ import { hashesForMedia, isVideoFilename, mediaDuplicate, rememberMediaHash, sha
 import { makePoster, posterObjectKey } from "./poster.ts";
 import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
 import { dateRangeRefusal, dayNotesOutsideRange, type DayNote } from "./trip-details.ts";
-import { filesFromTransfer } from "./drop-files.ts";
+import { filesFromTransfer, isDroppedMedia } from "./drop-files.ts";
 import { listTripGalleryKeys, listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 import { beginUploadList } from "./upload-progress.ts";
 import { createGate, createUploadQueue } from "./upload-pool.ts";
@@ -1030,7 +1030,7 @@ export function mountAuthor(root: HTMLElement): void {
     }
   }
 
-  async function uploadMedia(files: File[]): Promise<void> {
+  async function uploadMedia(files: File[], insertAt?: number): Promise<void> {
     if (!trip || !files.length) return;
     if (acceptMore) {
       acceptMore(files);
@@ -1038,6 +1038,8 @@ export function mountAuthor(root: HTMLElement): void {
     }
     const slug = trip.slug;
     uploading = true;
+    const placeOnNote = insertAt != null;
+    let insertCursor = insertAt ?? 0;
     const progress = beginUploadList(uploadList, uploadTemplate, files);
     const buffer: { more: File[]; start: number }[] = [];
     let nextIndex = files.length;
@@ -1176,6 +1178,13 @@ export function mountAuthor(root: HTMLElement): void {
           progress.update(index, "done", {
             note: posterWarning ? "Done. Login poster failed." : "Done",
           });
+          if (placeOnNote) {
+            await gate(() => {
+              const before = bodyEl.value.length;
+              placeMarkdown(placed.markdown, insertCursor);
+              insertCursor += bodyEl.value.length - before;
+            });
+          }
           renderPool();
         } catch (error) {
           hashes.delete(hash);
@@ -1223,7 +1232,10 @@ export function mountAuthor(root: HTMLElement): void {
         const noun = uploaded === 1 ? "file" : "files";
         const poster = posterWarning ? ` Login poster failed: ${posterWarning}` : "";
         const skippedText = skipNote ? ` ${skipNote}` : "";
-        setStatus(`Uploaded ${uploaded} ${noun}. Open View uploaded media, then drag one onto the day.${poster}${skippedText}`);
+        const placed = placeOnNote
+          ? `Uploaded ${uploaded} ${noun} into this day. Save day to keep ${uploaded === 1 ? "it" : "them"}.`
+          : `Uploaded ${uploaded} ${noun}. Open View uploaded media, then drag one onto the day.`;
+        setStatus(`${placed}${poster}${skippedText}`);
       } else if (skipNote) {
         setStatus(skipNote);
       }
@@ -1576,9 +1588,25 @@ export function mountAuthor(root: HTMLElement): void {
       placeMarkdown(markdown, dropCaret(event.clientX, event.clientY));
       return;
     }
-    if (event.dataTransfer?.files?.length) {
-      setStatus("Use the drop area above to upload. Drag a thumbnail from View uploaded media onto the note.", true);
-    }
+    const transfer = event.dataTransfer;
+    if (!transfer) return;
+    const caret = dropCaret(event.clientX, event.clientY);
+    void filesFromTransfer(transfer).then((files) => {
+      const media = files.filter(isDroppedMedia);
+      if (!media.length) {
+        if (files.length) setStatus("Drop a photo or video onto the note.", true);
+        return;
+      }
+      void uploadMedia(media, caret);
+    });
+  });
+  mediaPool.addEventListener("dragover", (event) => {
+    if ([...(event.dataTransfer?.types || [])].includes("Files")) event.preventDefault();
+  });
+  mediaPool.addEventListener("drop", (event) => {
+    if (![...(event.dataTransfer?.types || [])].includes("Files")) return;
+    event.preventDefault();
+    event.stopPropagation();
   });
 
   window.addEventListener("keydown", (event) => {

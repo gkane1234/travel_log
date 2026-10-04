@@ -213,8 +213,10 @@ const { slug = "" } = Astro.props;
         ></textarea>
         <div class="drop-hint">Drag a photo or video from View uploaded media onto this note. A click does not add it. Photos are re-saved without location data. Video location data may remain. Notes are stored with the trip, not in git.</div>
       </div>
+      <div id="pool-resize" hidden role="separator" aria-orientation="vertical" aria-label="Resize uploaded media"></div>
       <aside id="added-photos" hidden>
-        <p id="pool-hint" class="meta">Click a thumbnail to select it. Drag across the grid to select several. Drag a thumbnail onto the note to place it.</p>
+        <button type="button" id="pool-select" aria-pressed="false">Select photos</button>
+        <p id="pool-hint" class="meta">Drag a thumbnail onto the day note. Double-click to see it full size.</p>
         <p id="pool-actions" hidden>
           <button type="button" id="pool-remove">Remove</button>
           <button type="button" id="pool-download">Download</button>
@@ -393,13 +395,44 @@ const { slug = "" } = Astro.props;
     max-width: 72rem;
   }
   .note-layout:has(#added-photos:not([hidden])) {
-    grid-template-columns: minmax(0, 1fr) 17.5rem;
+    grid-template-columns: minmax(0, 1fr) 0.7rem var(--pool-width, 17.5rem);
+    column-gap: 0.2rem;
   }
   .note-layout:has(#added-photos:not([hidden])) .note-tools {
     grid-column: 1 / -1;
   }
+  #pool-resize[hidden],
   #added-photos[hidden] {
     display: none;
+  }
+  #pool-resize {
+    cursor: ew-resize;
+    touch-action: none;
+    align-self: stretch;
+    position: relative;
+  }
+  #pool-resize::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 3px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: var(--line);
+  }
+  #pool-select {
+    font-size: 0.9rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    margin: 0 0 0.35rem;
+  }
+  #pool-select[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
   #added-photos:not([hidden]) {
     display: flex;
@@ -495,14 +528,14 @@ const { slug = "" } = Astro.props;
   }
   #media-pool {
     display: grid;
-    grid-template-columns: repeat(auto-fill, 7.5rem);
+    grid-template-columns: repeat(auto-fill, var(--thumb, 7.5rem));
     gap: 0.45rem;
     position: relative;
   }
   button.pool-thumb {
     display: block;
-    width: 7.5rem;
-    height: 5.625rem;
+    width: var(--thumb, 7.5rem);
+    height: calc(var(--thumb, 7.5rem) * 0.75);
     padding: 0;
     margin: 0;
     overflow: hidden;
@@ -515,10 +548,10 @@ const { slug = "" } = Astro.props;
   }
   button.pool-thumb img,
   button.pool-thumb video {
-    width: 7.5rem;
-    height: 5.625rem;
-    max-width: 7.5rem;
-    max-height: 5.625rem;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
     object-fit: cover;
     margin: 0;
     display: block;

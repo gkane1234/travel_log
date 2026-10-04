@@ -112,23 +112,31 @@ export function mountAuthor(root: HTMLElement): void {
   const mediaPool = must<HTMLElement>(root, "media-pool");
   const poolHint = must<HTMLElement>(root, "pool-hint");
   const poolActions = must<HTMLElement>(root, "pool-actions");
+  const poolSelect = must<HTMLButtonElement>(root, "pool-select");
+  const poolResize = must<HTMLElement>(root, "pool-resize");
   const poolRemove = must<HTMLButtonElement>(root, "pool-remove");
   const poolDownload = must<HTMLButtonElement>(root, "pool-download");
+  const noteLayout = addedPhotos.parentElement;
+  if (!(noteLayout instanceof HTMLElement)) throw new Error("Missing the note layout.");
   const poolMarquee = document.createElement("div");
   poolMarquee.id = "pool-marquee";
   poolMarquee.hidden = true;
   root.append(poolMarquee);
   const selectedPaths = new Set<string>();
+  const POOL_WIDTH_KEY = "travel-log-media-pool-width";
+  const THUMB_MIN = 120;
+  const PANEL_DEFAULT = 280;
   type PoolGesture = {
     id: number;
     x: number;
     y: number;
     path: string;
-    mode: "pending" | "marquee" | "insert";
-    background: boolean;
+    mode: "pending" | "marquee";
   };
+  let selecting = false;
   let poolGesture: PoolGesture | null = null;
   let ignorePoolClick = false;
+  let poolWidthDrag: { id: number; startX: number; startWidth: number } | null = null;
   const uploadList = must<HTMLOListElement>(root, "upload-progress");
   const uploadTemplate = must<HTMLTemplateElement>(root, "upload-file-template");
   const thumbTip = document.createElement("span");
@@ -284,6 +292,7 @@ export function mountAuthor(root: HTMLElement): void {
 
   function setAddedOpen(open: boolean): void {
     addedPhotos.hidden = !open;
+    poolResize.hidden = !open;
     addedPhotosToggle.setAttribute("aria-expanded", open ? "true" : "false");
     if (!open) closePhotoPreview();
   }
@@ -423,7 +432,9 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   function renderPool(): void {
-    poolHint.textContent = "Click a thumbnail to select it. Drag across the grid to select several. Drag a thumbnail onto the note to place it. Double-click to see it full size.";
+    poolHint.textContent = selecting
+      ? "Click a thumbnail to select it, or drag a rectangle across them."
+      : "Drag a thumbnail onto the day note. Double-click to see it full size.";
     for (const path of [...selectedPaths]) {
       if (!poolItems.some((item) => item.path === path)) selectedPaths.delete(path);
     }
@@ -440,7 +451,7 @@ export function mountAuthor(root: HTMLElement): void {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "pool-thumb";
-      button.draggable = true;
+      button.draggable = !selecting;
       button.dataset.path = item.path;
       button.setAttribute("aria-pressed", selectedPaths.has(item.path) ? "true" : "false");
       if (selectedPaths.has(item.path)) button.classList.add("is-selected");
@@ -491,17 +502,21 @@ export function mountAuthor(root: HTMLElement): void {
         thumbTip.hidden = true;
       });
       button.addEventListener("dblclick", (event) => {
+        if (selecting) {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         openPhotoPreview(item);
       });
       button.addEventListener("click", () => {
-        if (ignorePoolClick) return;
+        if (!selecting || ignorePoolClick) return;
         if (selectedPaths.has(item.path)) selectedPaths.delete(item.path);
         else selectedPaths.add(item.path);
         paintSelection();
       });
       button.addEventListener("dragstart", (event) => {
-        if (!poolGesture || poolGesture.mode !== "insert") {
+        if (selecting) {
           event.preventDefault();
           return;
         }
@@ -512,11 +527,6 @@ export function mountAuthor(root: HTMLElement): void {
       mediaPool.append(button);
     }
     paintSelection();
-  }
-
-  function pointIn(element: HTMLElement, x: number, y: number): boolean {
-    const rect = element.getBoundingClientRect();
-    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
   }
 
   function hidePoolMarquee(): void {
@@ -642,8 +652,45 @@ export function mountAuthor(root: HTMLElement): void {
     setStatus(notes.join(" "), Boolean(failed.length));
   }
 
+  function poolWidthLimits(): { min: number; max: number } {
+    const layout = noteLayout.getBoundingClientRect().width;
+    const max = layout > 480 ? Math.max(PANEL_DEFAULT, layout - 220) : 720;
+    return { min: THUMB_MIN + 8, max };
+  }
+
+  function applyPoolWidth(px: number): number {
+    const limits = poolWidthLimits();
+    const width = Math.round(Math.min(limits.max, Math.max(limits.min, px)));
+    const scaled = Math.round(width * (THUMB_MIN / PANEL_DEFAULT));
+    const thumb = Math.max(THUMB_MIN, Math.min(width, scaled));
+    noteLayout.style.setProperty("--pool-width", `${width}px`);
+    noteLayout.style.setProperty("--thumb", `${thumb}px`);
+    return width;
+  }
+
+  function setSelecting(on: boolean): void {
+    selecting = on;
+    poolSelect.textContent = on ? "Done selecting" : "Select photos";
+    poolSelect.setAttribute("aria-pressed", on ? "true" : "false");
+    if (!on) {
+      selectedPaths.clear();
+      hidePoolMarquee();
+      poolGesture = null;
+    }
+    poolHint.textContent = on
+      ? "Click a thumbnail to select it, or drag a rectangle across them."
+      : "Drag a thumbnail onto the day note. Double-click to see it full size.";
+    for (const button of mediaPool.querySelectorAll<HTMLButtonElement>(".pool-thumb")) {
+      button.draggable = !on;
+    }
+    paintSelection();
+  }
+
+  const storedPoolWidth = Number(localStorage.getItem(POOL_WIDTH_KEY));
+  if (Number.isFinite(storedPoolWidth) && storedPoolWidth > 0) applyPoolWidth(storedPoolWidth);
+
   mediaPool.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+    if (!selecting || event.button !== 0) return;
     const target = event.target instanceof Element ? event.target : null;
     const thumb = target?.closest<HTMLElement>(".pool-thumb") || null;
     poolGesture = {
@@ -652,9 +699,8 @@ export function mountAuthor(root: HTMLElement): void {
       y: event.clientY,
       path: thumb?.dataset.path || "",
       mode: "pending",
-      background: !thumb,
     };
-    if (!thumb) event.preventDefault();
+    event.preventDefault();
     try {
       mediaPool.setPointerCapture(event.pointerId);
     } catch {
@@ -664,29 +710,12 @@ export function mountAuthor(root: HTMLElement): void {
 
   mediaPool.addEventListener("pointermove", (event) => {
     const gesture = poolGesture;
-    if (!gesture || event.pointerId !== gesture.id) return;
+    if (!selecting || !gesture || event.pointerId !== gesture.id) return;
     const dx = event.clientX - gesture.x;
     const dy = event.clientY - gesture.y;
     if (gesture.mode === "pending" && dx * dx + dy * dy < 36) return;
-    if (gesture.background || gesture.mode === "marquee") {
-      gesture.mode = "marquee";
-      selectInMarquee(gesture.x, gesture.y, event.clientX, event.clientY);
-      return;
-    }
-    const inside = pointIn(mediaPool, event.clientX, event.clientY);
-    if (!inside) {
-      gesture.mode = "insert";
-      hidePoolMarquee();
-      dropzone.classList.toggle("dragover", pointIn(dropzone, event.clientX, event.clientY));
-      return;
-    }
-    const hit = document.elementFromPoint(event.clientX, event.clientY);
-    const over = hit instanceof Element ? hit.closest<HTMLElement>(".pool-thumb") : null;
-    const overPath = over?.dataset.path || "";
-    if (!overPath || overPath !== gesture.path) {
-      gesture.mode = "marquee";
-      selectInMarquee(gesture.x, gesture.y, event.clientX, event.clientY);
-    }
+    gesture.mode = "marquee";
+    selectInMarquee(gesture.x, gesture.y, event.clientX, event.clientY);
   });
 
   function finishPoolGesture(event: PointerEvent): void {
@@ -695,22 +724,21 @@ export function mountAuthor(root: HTMLElement): void {
     const dx = event.clientX - gesture.x;
     const dy = event.clientY - gesture.y;
     const moved = dx * dx + dy * dy >= 36;
-    dropzone.classList.remove("dragover");
     hidePoolMarquee();
     poolGesture = null;
-    if (gesture.mode === "insert" && gesture.path && pointIn(dropzone, event.clientX, event.clientY)) {
-      const item = poolItems.find((entry) => entry.path === gesture.path);
-      if (item) placeMarkdown(item.markdown, dropCaret(event.clientX, event.clientY));
-    } else if (gesture.mode === "pending" && !gesture.path && !moved) {
-      selectedPaths.clear();
+    if (selecting && gesture.mode !== "marquee" && !moved) {
+      if (gesture.path) {
+        if (selectedPaths.has(gesture.path)) selectedPaths.delete(gesture.path);
+        else selectedPaths.add(gesture.path);
+      } else {
+        selectedPaths.clear();
+      }
       paintSelection();
     }
-    if (gesture.mode === "marquee" || gesture.mode === "insert" || moved) {
-      ignorePoolClick = true;
-      window.setTimeout(() => {
-        ignorePoolClick = false;
-      }, 0);
-    }
+    ignorePoolClick = true;
+    window.setTimeout(() => {
+      ignorePoolClick = false;
+    }, 0);
     try {
       mediaPool.releasePointerCapture(event.pointerId);
     } catch {
@@ -719,7 +747,59 @@ export function mountAuthor(root: HTMLElement): void {
   }
 
   mediaPool.addEventListener("pointerup", finishPoolGesture);
-  mediaPool.addEventListener("pointercancel", finishPoolGesture);
+  mediaPool.addEventListener("pointercancel", (event) => {
+    hidePoolMarquee();
+    poolGesture = null;
+    try {
+      mediaPool.releasePointerCapture(event.pointerId);
+    } catch {
+      /* Capture may already be gone. */
+    }
+  });
+  poolSelect.addEventListener("click", () => {
+    setSelecting(!selecting);
+  });
+  poolResize.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    poolWidthDrag = {
+      id: event.pointerId,
+      startX: event.clientX,
+      startWidth: addedPhotos.getBoundingClientRect().width,
+    };
+    try {
+      poolResize.setPointerCapture(event.pointerId);
+    } catch {
+      /* The width still updates while the pointer stays on the handle. */
+    }
+  });
+  poolResize.addEventListener("pointermove", (event) => {
+    if (!poolWidthDrag || event.pointerId !== poolWidthDrag.id) return;
+    event.preventDefault();
+    event.stopPropagation();
+    applyPoolWidth(poolWidthDrag.startWidth - (event.clientX - poolWidthDrag.startX));
+  });
+  function finishPoolResize(event: PointerEvent): void {
+    if (!poolWidthDrag || event.pointerId !== poolWidthDrag.id) return;
+    const width = applyPoolWidth(poolWidthDrag.startWidth - (event.clientX - poolWidthDrag.startX));
+    localStorage.setItem(POOL_WIDTH_KEY, String(width));
+    poolWidthDrag = null;
+    try {
+      poolResize.releasePointerCapture(event.pointerId);
+    } catch {
+      /* Capture may already be gone. */
+    }
+  }
+  poolResize.addEventListener("pointerup", finishPoolResize);
+  poolResize.addEventListener("pointercancel", (event) => {
+    poolWidthDrag = null;
+    try {
+      poolResize.releasePointerCapture(event.pointerId);
+    } catch {
+      /* Capture may already be gone. */
+    }
+  });
   poolRemove.addEventListener("click", () => {
     void removeSelected();
   });

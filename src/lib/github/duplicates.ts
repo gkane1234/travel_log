@@ -21,23 +21,20 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/** Hash media already stored for this trip. Missing files are ignored. */
+export function isVideoFilename(name: string): boolean {
+  return /\.(mp4|m4v|webm|mov)$/i.test(name);
+}
+
+/**
+ * Hashes already known for this trip. Videos are filename-only, so they are
+ * not downloaded or hashed. Stored photos are not fetched here either; a hung
+ * download must not stall the next file.
+ */
 export async function hashesForMedia(slug: string, names: Iterable<string>): Promise<Map<string, string>> {
   const hashes = new Map<string, string>();
   for (const name of names) {
-    if (!name || name.includes("/") || name.includes("..")) continue;
-    const key = `${slug}/${name}`;
-    let hash = remoteHashes.get(key) || "";
-    if (!hash) {
-      try {
-        const response = await fetch(`/travel-log/media/${slug}/photos/${name}`, { credentials: "include" });
-        if (!response.ok) continue;
-        hash = await sha256Hex(new Uint8Array(await response.arrayBuffer()));
-        remoteHashes.set(key, hash);
-      } catch {
-        continue;
-      }
-    }
+    if (!name || name.includes("/") || name.includes("..") || isVideoFilename(name)) continue;
+    const hash = remoteHashes.get(`${slug}/${name}`) || "";
     if (hash) hashes.set(hash, name);
   }
   return hashes;

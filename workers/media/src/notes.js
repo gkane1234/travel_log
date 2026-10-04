@@ -45,6 +45,29 @@ export async function readTripNotes(bucket, paths) {
   return files;
 }
 
+const GALLERY_FILE = /\.(jpe?g|png|gif|webp|mp4|m4v|webm|mov)$/i;
+
+/** Photos and videos stored for one trip. Same set the trip page gallery lists. */
+export async function listTripGalleryKeys(bucket, slug) {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(slug || ""))) {
+    throw noteError("Invalid trip.", 400);
+  }
+  const prefix = `media/${slug}/photos/`;
+  const keys = [];
+  let cursor;
+  do {
+    const listed = await bucket.list({ prefix, cursor });
+    for (const object of listed.objects) {
+      const name = object.key.slice(prefix.length);
+      if (!name || name.includes("/") || !GALLERY_FILE.test(name)) continue;
+      keys.push(object.key);
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+  keys.sort();
+  return keys;
+}
+
 export async function listTripNoteKeys(bucket) {
   const keys = [];
   let cursor;

@@ -125,6 +125,16 @@ export async function readTripNotes(options: {
   return Array.isArray(files) ? (files as TripNote[]) : [];
 }
 
+export async function listTripGalleryKeys(options: {
+  workerUrl: string;
+  token: string;
+  slug: string;
+}): Promise<string[]> {
+  const data = await postTravelLog("gallery/list", options, { slug: options.slug });
+  const keys = data.keys;
+  return Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : [];
+}
+
 export async function listTripNoteKeys(options: { workerUrl: string; token: string }): Promise<string[]> {
   const data = await postTravelLog("notes/list", options, {});
   const keys = data.keys;

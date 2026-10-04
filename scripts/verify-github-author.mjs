@@ -26,10 +26,10 @@ import { checkLogin, loginPage, respondToMediaGet, safeNext } from "../workers/m
 import { isTripCoverPath, publicTripCards, renderJournal, setCoverFrontmatter, streamLoginPosters } from "../workers/media/src/journal.js";
 import { uploadGalleryFiles } from "../src/lib/github/gallery-client.ts";
 import { UPLOAD_POOL_SIZE } from "../src/lib/github/upload-pool.ts";
-import { mediaDuplicate, sha256Hex, skippedNote } from "../src/lib/github/duplicates.ts";
+import { hashesForMedia, isVideoFilename, mediaDuplicate, sha256Hex, skippedNote } from "../src/lib/github/duplicates.ts";
 import { dateRangeRefusal, dayNotesOutsideRange } from "../src/lib/github/trip-details.ts";
 import { parseFrontmatter, stringifyFrontmatter } from "../src/lib/github/frontmatter.ts";
-import { putTripNotes, tripNoteKey } from "../workers/media/src/notes.js";
+import { listTripGalleryKeys, putTripNotes, tripNoteKey } from "../workers/media/src/notes.js";
 import sharp from "sharp";
 
 const day = dayRepoPath("olympic-peninsula", "2026-09-08");
@@ -676,6 +676,8 @@ assert.match(progressUi, /addFiles\(more\)/);
 assert.match(progressUi, /upload-count/);
 assert.match(progressUi, /!isHeicFile\(file\)/);
 const galleryUi = readFileSync(new URL("../src/lib/github/gallery-client.ts", import.meta.url), "utf8");
+assert.match(authorUi, /listTripGalleryKeys/);
+assert.match(galleryUi, /prepared\.kind === "photo"/);
 assert.match(galleryUi, /createUploadQueue/);
 assert.match(galleryUi, /onReady/);
 assert.match(galleryUi, /"preview"/);
@@ -709,6 +711,37 @@ const otherVideo = await sha256Hex(new TextEncoder().encode("other-video-bytes")
 assert.notEqual(sameVideo, otherVideo);
 assert.equal(mediaDuplicate("new.mp4", sameVideo, new Set(), new Map([[sameVideo, "clip.mp4"]])), true);
 assert.equal(mediaDuplicate("new.mp4", otherVideo, new Set(), new Map([[sameVideo, "clip.mp4"]])), false);
+assert.equal(isVideoFilename("Walk.MOV"), true);
+assert.equal(isVideoFilename("shore.jpg"), false);
+const previousFetch = globalThis.fetch;
+let hashFetches = 0;
+globalThis.fetch = async () => {
+  hashFetches += 1;
+  return new Response("no");
+};
+const knownHashes = await hashesForMedia("olympic-peninsula", ["clip.mov", "shore.jpg"]);
+globalThis.fetch = previousFetch;
+assert.equal(hashFetches, 0);
+assert.equal(knownHashes.size, 0);
+const galleryBucket = {
+  async list({ prefix }) {
+    return {
+      objects: [
+        "media/coast/photos/shore.jpg",
+        "media/coast/photos/clip.mov",
+        "media/coast/photos/notes.txt",
+        "posters/coast/shore.jpg",
+      ]
+        .filter((key) => key.startsWith(prefix))
+        .map((key) => ({ key })),
+      truncated: false,
+    };
+  },
+};
+assert.deepEqual(await listTripGalleryKeys(galleryBucket, "coast"), [
+  "media/coast/photos/clip.mov",
+  "media/coast/photos/shore.jpg",
+]);
 
 const kept = [
   { date: "2026-09-05", text: "Ferry at dawn.\n" },

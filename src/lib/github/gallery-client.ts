@@ -85,20 +85,24 @@ export async function uploadGalleryFiles(
       onFile?.(index, "failed", undefined, message);
       return;
     }
-    const hash = await sha256Hex(prepared.bytes);
-    const duplicate = await gate(() => {
-      if (mediaDuplicate("", hash, existing, hashes) || pendingHashes.has(hash)) {
-        existing.delete(prepared.filename);
-        return true;
+    let hash = "";
+    if (prepared.kind === "photo") {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      hash = await sha256Hex(prepared.bytes);
+      const duplicate = await gate(() => {
+        if (mediaDuplicate("", hash, existing, hashes) || pendingHashes.has(hash)) {
+          existing.delete(prepared.filename);
+          return true;
+        }
+        pendingHashes.add(hash);
+        hashes.set(hash, prepared.filename);
+        return false;
+      });
+      if (duplicate) {
+        skipped.push(file.name);
+        onFile?.(index, "skipped", undefined, skippedNote(file.name));
+        return;
       }
-      pendingHashes.add(hash);
-      hashes.set(hash, prepared.filename);
-      return false;
-    });
-    if (duplicate) {
-      skipped.push(file.name);
-      onFile?.(index, "skipped", undefined, skippedNote(file.name));
-      return;
     }
     if (prepared.kind === "photo") {
       onFile?.(index, "preview", undefined, undefined, new Blob([prepared.bytes], { type: prepared.contentType }));

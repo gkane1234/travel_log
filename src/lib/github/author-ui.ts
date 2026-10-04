@@ -13,12 +13,12 @@ import {
 import { addDays, slugify } from "./dates.ts";
 import { parseFrontmatter, stringifyFrontmatter, tripFromIndex, type RemoteTrip } from "./frontmatter.ts";
 import { plannedMediaFilename, prepareDroppedFile } from "./media.ts";
-import { hashesForMedia, mediaDuplicate, rememberMediaHash, sha256Hex, skippedNote } from "./duplicates.ts";
+import { hashesForMedia, isVideoFilename, mediaDuplicate, rememberMediaHash, sha256Hex, skippedNote } from "./duplicates.ts";
 import { makePoster, posterObjectKey } from "./poster.ts";
 import { clearSettings, loadSettings, saveSettings } from "./settings.ts";
 import { dateRangeRefusal, dayNotesOutsideRange, type DayNote } from "./trip-details.ts";
 import { filesFromTransfer } from "./drop-files.ts";
-import { listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
+import { listTripGalleryKeys, listTripNoteKeys, mediaWorkerOrigin, readTripNotes, uploadToBucket, writeTripNotes } from "./upload.ts";
 import { beginUploadList } from "./upload-progress.ts";
 import { createGate, createUploadQueue } from "./upload-pool.ts";
 
@@ -485,6 +485,21 @@ export function mountAuthor(root: HTMLElement): void {
       add(raw ?? "");
     }
     add(bodyEl.value);
+    try {
+      const stored = await listTripGalleryKeys({ ...notesTarget(), slug: trip.slug });
+      for (const key of stored) {
+        const filename = key.split("/").pop() || "";
+        if (!filename || filename.includes("..")) continue;
+        const path = `/trip-media/${trip.slug}/photos/${filename}`;
+        const kind = isVideoFilename(filename) ? "video" : "photo";
+        if (!fromNotes.some((entry) => entry.filename === filename || entry.path === path)) {
+          fromNotes.push(poolItemFrom({ kind, filename, path }));
+        }
+        if (kind === "photo" && !photoPaths.includes(path)) photoPaths.push(path);
+      }
+    } catch {
+      /* Day notes still show if the gallery list fails. */
+    }
     const sessionOnly = poolItems.filter((item) => !fromNotes.some((entry) => entry.path === item.path));
     poolItems = [...fromNotes, ...sessionOnly];
     for (const item of sessionOnly) {
@@ -751,20 +766,24 @@ export function mountAuthor(root: HTMLElement): void {
           progress.update(index, "failed", { note: message });
           return;
         }
-        const hash = await sha256Hex(prepared.bytes);
-        const duplicate = await gate(() => {
-          if (mediaDuplicate("", hash, photos, hashes) || pendingHashes.has(hash)) {
-            photos.delete(prepared.filename);
-            return true;
+        let hash = "";
+        if (prepared.kind === "photo") {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          hash = await sha256Hex(prepared.bytes);
+          const duplicate = await gate(() => {
+            if (mediaDuplicate("", hash, photos, hashes) || pendingHashes.has(hash)) {
+              photos.delete(prepared.filename);
+              return true;
+            }
+            pendingHashes.add(hash);
+            hashes.set(hash, prepared.filename);
+            return false;
+          });
+          if (duplicate) {
+            skipped.push(file.name);
+            progress.update(index, "skipped", { note: skippedNote(file.name) });
+            return;
           }
-          pendingHashes.add(hash);
-          hashes.set(hash, prepared.filename);
-          return false;
-        });
-        if (duplicate) {
-          skipped.push(file.name);
-          progress.update(index, "skipped", { note: skippedNote(file.name) });
-          return;
         }
         const placed = poolItemFrom({
           kind: prepared.kind,

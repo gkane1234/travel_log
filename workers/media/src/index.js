@@ -1,7 +1,7 @@
 import { AwsClient } from "aws4fetch";
 import { POSTER_MAX_BYTES, PUBLIC_PREFIX, isAllowedKey, isAllowedType, isPosterKey, mediaPublicUrl, storageConfigError } from "./config.js";
 import { isTripCoverPath, renderJournal, setCoverFrontmatter, streamLoginPosters } from "./journal.js";
-import { listTripNoteKeys, putTripNotes, readTripNotes } from "./notes.js";
+import { listTripGalleryKeys, listTripNoteKeys, putTripNotes, readTripNotes } from "./notes.js";
 import { checkLogin, loginPage, logoutSetCookie, mediaGate, safeNext } from "./gate.js";
 
 function json(body, status, extra = {}) {
@@ -329,6 +329,25 @@ export default {
         });
       }
       return json({ ok: true }, 200, { "Set-Cookie": result.cookie });
+    }
+
+    if (request.method === "POST" && path === `${PUBLIC_PREFIX}/gallery/list`) {
+      const allowed = await canEditNotes(request, env);
+      if (!allowed.ok) return cors(json({ error: allowed.error }, allowed.status));
+      if (!env.TRIPS) return cors(json({ error: "Trip storage is not configured." }, 503));
+      let galleryBody;
+      try {
+        galleryBody = await request.json();
+      } catch {
+        return cors(json({ error: "Expected a JSON body." }, 400));
+      }
+      try {
+        const keys = await listTripGalleryKeys(env.TRIPS, galleryBody.slug);
+        return cors(json({ keys }, 200));
+      } catch (error) {
+        const status = Number(error.status) || 400;
+        return cors(json({ error: error.message || "Could not list photos." }, status));
+      }
     }
 
     if (
